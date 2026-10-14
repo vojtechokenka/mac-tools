@@ -10,10 +10,30 @@ Three small menu bar utilities for macOS, written in plain Swift and built with 
 
 ## Requirements
 
-- macOS 15 or newer (Hub needs 14.2+ for Core Audio process taps and 15 for the `Synchronization` module).
-- Xcode Command Line Tools (`xcode-select --install`) to build from source. Full Xcode is not needed.
+- macOS 14 or newer for Todo and Picker, macOS 15 or newer for Hub (Core Audio process taps + the `Synchronization` module).
+- Apple Silicon or Intel.
 
-## Install
+## Install (prebuilt, no developer tools needed)
+
+Paste this into Terminal — it downloads the latest universal builds (Apple Silicon + Intel) into `/Applications`:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/vojtechokenka/mac-tools/main/get.sh | zsh
+```
+
+To install only some of the apps: `curl -fsSL https://raw.githubusercontent.com/vojtechokenka/mac-tools/main/get.sh | zsh -s Hub Picker`
+
+Or download a `.zip` from [Releases](https://github.com/vojtechokenka/mac-tools/releases), unzip it into `/Applications` and, because the apps are not notarized, clear the quarantine flag once:
+
+```bash
+xattr -dr com.apple.quarantine /Applications/Hub.app
+```
+
+Launch the apps from Finder or Spotlight (not directly from a terminal — macOS attributes privacy permissions to the terminal otherwise). To start them at login, add them in System Settings → General → Login Items.
+
+## Build from source
+
+Requires the Xcode Command Line Tools (`xcode-select --install`); full Xcode is not needed.
 
 ```bash
 git clone https://github.com/vojtechokenka/mac-tools.git
@@ -21,20 +41,14 @@ cd mac-tools
 ./install.sh
 ```
 
-`install.sh` builds every app into `<App>/build/<App>.app` and copies it to `/Applications`. Launch the apps from Finder or Spotlight (not directly from a terminal — macOS attributes privacy permissions to the terminal otherwise). To start them at login, add them in System Settings → General → Login Items.
-
-You can also build a single app:
-
-```bash
-cd Hub && ./build.sh && cp -R build/Hub.app /Applications/
-```
+`install.sh` builds every app into `<App>/build/<App>.app` and copies it to `/Applications`. A single app: `cd Hub && ./build.sh && cp -R build/Hub.app /Applications/`. `UNIVERSAL=1 ./build.sh` produces a universal binary; `./release.sh vX.Y.Z` builds all three and publishes a GitHub release.
 
 ## Permissions
 
 - **Hub** asks for *System Audio Recording* (needed for per-app volume — it captures each app's audio, adjusts it and plays it back) and *Accessibility* (⌘ + brightness keys, pausing media when the sleep timer ends).
 - **Todo** and **Picker** need nothing.
 
-The apps are ad-hoc signed. That means macOS Gatekeeper refuses to open a prebuilt `.app` downloaded from the internet; building from source on your own Mac avoids that. It also means a rebuilt app gets a new identity, so re-grant the permissions after rebuilding.
+The apps are ad-hoc signed, not notarized. Prebuilt downloads therefore need the quarantine flag removed (`get.sh` does it for you); building from source avoids it entirely. A rebuilt or updated app gets a new identity, so re-grant the permissions after updating.
 
 ## Hub
 
