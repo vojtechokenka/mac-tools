@@ -1,7 +1,7 @@
 #!/bin/zsh
 set -e
 cd "$(dirname "$0")"
-for app in Hub Todo Picker; do
+for app in Hub Todo Picker Squeeze; do
   echo "Building $app…"
   (cd "$app" && ./build.sh)
   osascript -e "quit app \"$app\"" >/dev/null 2>&1 || true

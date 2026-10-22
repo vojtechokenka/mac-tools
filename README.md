@@ -7,6 +7,7 @@ Three small menu bar utilities for macOS, written in plain Swift and built with 
 | **Hub** | Per-app volume mixer with live meters, a night mode that hard-caps loudness, a sleep timer that fades audio out and puts the Mac to sleep, screen dimming below the system minimum (⌘ + brightness keys), and a stay-awake timer. |
 | **Todo** | A to-do list in the menu bar backed by a plain Markdown file. Projects (`Project; task`), deadlines with a countdown, ⌃⌥N to add a task from anywhere. |
 | **Picker** | Color picker: click the icon or press ⌃⌥C to sample any pixel with the system loupe; HEX / RGB / HSL in copyable chips, history of the last 12 colors. |
+| **Squeeze** | Image optimizer for the web: drop images or folders on the menu bar icon, pick WebP / AVIF / JPEG / PNG, max size and quality, strip metadata, rename with Figma-style tokens, save next to the originals, replace them, or into a folder of your choice. |
 
 ## Requirements
 
@@ -21,7 +22,7 @@ Paste this into Terminal — it downloads the latest universal builds (Apple Sil
 curl -fsSL https://raw.githubusercontent.com/vojtechokenka/mac-tools/main/get.sh | zsh
 ```
 
-To install only some of the apps: `curl -fsSL https://raw.githubusercontent.com/vojtechokenka/mac-tools/main/get.sh | zsh -s Hub Picker`
+To install only some of the apps: `curl -fsSL https://raw.githubusercontent.com/vojtechokenka/mac-tools/main/get.sh | zsh -s Squeeze`
 
 Or download a `.zip` from [Releases](https://github.com/vojtechokenka/mac-tools/releases), unzip it into `/Applications` and, because the apps are not notarized, clear the quarantine flag once:
 
@@ -46,7 +47,7 @@ cd mac-tools
 ## Permissions
 
 - **Hub** asks for *System Audio Recording* (needed for per-app volume — it captures each app's audio, adjusts it and plays it back) and *Accessibility* (⌘ + brightness keys, pausing media when the sleep timer ends).
-- **Todo** and **Picker** need nothing.
+- **Todo**, **Picker** and **Squeeze** need nothing.
 
 The apps are ad-hoc signed, not notarized. Prebuilt downloads therefore need the quarantine flag removed (`get.sh` does it for you); building from source avoids it entirely. A rebuilt or updated app gets a new identity, so re-grant the permissions after updating.
 
@@ -78,6 +79,11 @@ The apps are ad-hoc signed, not notarized. Prebuilt downloads therefore need the
 ## Picker
 
 - Click the icon or press ⌃⌥C, pick a color. The preferred format (HEX by default, set via right click → Copy as) is copied automatically; click any chip to copy that single value, click the HEX/RGB/HSL label to copy the full notation. The panel stays until you close it and can be dragged around.
+
+## Squeeze
+
+- Drop files or folders on the menu bar icon, or open the window (left click) and drop them there / use Add images…. Options: format (WebP by default, encoded with the bundled [libwebp](https://developers.google.com/speed/webp), BSD license; AVIF/JPEG/PNG via ImageIO), quality, max long edge (never upscales), destination (next to the originals in `optimized/`, replace the originals — they go to the Trash — or a chosen folder, optionally grouped into an `optimized/` subfolder), and a rename pattern with `{name}`, `{n}` and `{n-}` tokens (default `opt-{name}`). EXIF/GPS/ICC metadata is stripped; orientation and alpha are preserved.
+- Right click: Open files…, Settings…, Quit. The window shows a summary ("12 images, 38.4 MB → 2.1 MB") and can reveal the results in Finder.
 
 ## License
 

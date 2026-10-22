@@ -2,7 +2,7 @@
 set -e
 REPO="vojtechokenka/mac-tools"
 APPS=("$@")
-[[ ${#APPS[@]} -eq 0 ]] && APPS=(Hub Todo Picker)
+[[ ${#APPS[@]} -eq 0 ]] && APPS=(Hub Todo Picker Squeeze)
 MAJOR=$(sw_vers -productVersion | cut -d. -f1)
 if [[ "$MAJOR" -lt 14 ]]; then echo "macOS 14 or newer is required (you have $(sw_vers -productVersion))."; exit 1; fi
 TMP=$(mktemp -d)
