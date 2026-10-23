@@ -134,6 +134,7 @@ final class TaskRowView: NSView, NSTextFieldDelegate {
     }
 
     private func updateChrome() {
+        needsLayout = true
         editButton.isHidden = !hovered || editing
         dateButton.isHidden = !hovered || editing
         deleteButton.isHidden = !hovered || editing
@@ -149,12 +150,12 @@ final class TaskRowView: NSView, NSTextFieldDelegate {
         deleteButton.frame = NSRect(x: width - 26, y: (height - 20) / 2, width: 20, height: 20)
         editButton.frame = NSRect(x: width - 48, y: (height - 20) / 2, width: 20, height: 20)
         dateButton.frame = NSRect(x: width - 70, y: (height - 20) / 2, width: 20, height: 20)
-        let limit = editing ? width - 8 : width - 74
+        let limit = (hovered && !editing) ? width - 74 : width - 8
         let metaWidth = metaButton.isHidden ? 0 : ceil(metaButton.intrinsicContentSize.width) + 12
-        let available = limit - 32 - metaWidth - (metaWidth > 0 ? 8 : 0)
-        let textWidth = editing ? max(20, limit - 32) : max(20, min(available, ceil(textField.intrinsicContentSize.width) + 4))
-        textField.frame = NSRect(x: 32, y: (height - 18) / 2, width: textWidth, height: 18)
-        metaButton.frame = NSRect(x: 32 + textWidth + 8, y: (height - 20) / 2, width: metaWidth, height: 20)
+        metaButton.frame = NSRect(x: 32, y: (height - 20) / 2, width: metaWidth, height: 20)
+        let textX: CGFloat = 32 + (metaWidth > 0 ? metaWidth + 8 : 0)
+        let textWidth = max(20, limit - textX)
+        textField.frame = NSRect(x: textX, y: (height - 18) / 2, width: textWidth, height: 18)
     }
 
     override func updateTrackingAreas() {
