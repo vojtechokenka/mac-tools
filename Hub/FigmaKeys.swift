@@ -30,7 +30,7 @@ final class FigmaPivotKey {
             guard let userInfo else { return Unmanaged.passUnretained(event) }
             let key = Unmanaged<FigmaPivotKey>.fromOpaque(userInfo).takeUnretainedValue()
             if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
-                if let tap = key.tap { CGEvent.tapEnable(tap: tap, enable: key.figmaActive) }
+                if key.figmaActive, let tap = key.tap { CGEvent.tapEnable(tap: tap, enable: true) }
                 return Unmanaged.passUnretained(event)
             }
             return key.handle(event) ? nil : Unmanaged.passUnretained(event)
