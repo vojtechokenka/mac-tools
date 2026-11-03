@@ -4,7 +4,7 @@ cd "$(dirname "$0")"
 APP="build/Hub.app"
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS"
-SOURCES=(main.swift Controls.swift Audio.swift NightChain.swift Display.swift Awake.swift)
+SOURCES=(main.swift Controls.swift Audio.swift NightChain.swift Display.swift Awake.swift FigmaKeys.swift)
 FRAMEWORKS=(-framework AppKit -framework AudioToolbox -framework CoreAudio -framework Carbon -framework IOKit)
 if [[ "$UNIVERSAL" == "1" ]]; then
   swiftc -O -target arm64-apple-macos15.0 -o "$APP/Contents/MacOS/Hub-arm64" "${SOURCES[@]}" "${FRAMEWORKS[@]}"

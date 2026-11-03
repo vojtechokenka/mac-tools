@@ -57,6 +57,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     private let dimmer = GammaDimmer()
     private let brightnessKeys = BrightnessKeys()
+    private let figmaPivotKey = FigmaPivotKey()
     private let dimItem = NSMenuItem()
     private var dimRow: BrightnessRow!
     private var dimWatchdog: Timer?
@@ -122,6 +123,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
         brightnessKeys.registerHotKeys()
         brightnessKeys.installBrightnessTapWhenTrusted()
+        figmaPivotKey.installWhenTrusted()
 
         awake.onChange = { [weak self] in self?.syncAwakeControls() }
         syncAwakeControls()
