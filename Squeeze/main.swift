@@ -866,6 +866,10 @@ final class SqueezeWindowController: NSWindowController, NSTableViewDataSource, 
         updatePreview()
     }
 
+    func windowWillClose(_ notification: Notification) {
+        if case .finished = state { reset() }
+    }
+
     private func clearAndClose() {
         reset()
         window?.close()
