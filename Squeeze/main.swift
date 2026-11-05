@@ -20,6 +20,11 @@ enum Settings {
         set { defaults.set(newValue, forKey: "maxEdge") }
     }
 
+    static var pdfDpi: PDFResolution {
+        get { PDFResolution(rawValue: defaults.string(forKey: "pdfDpi") ?? "") ?? .dpi150 }
+        set { defaults.set(newValue.rawValue, forKey: "pdfDpi") }
+    }
+
     static var destinationMode: String {
         get { defaults.string(forKey: "destination") ?? "subfolder" }
         set { defaults.set(newValue, forKey: "destination") }
@@ -53,7 +58,7 @@ enum Settings {
     }
 
     static var options: OptimizeOptions {
-        OptimizeOptions(format: format, quality: quality, maxEdge: maxEdge, destination: destination, pattern: pattern, startNumber: startNumber)
+        OptimizeOptions(format: format, quality: quality, maxEdge: maxEdge, pdfDpi: pdfDpi, destination: destination, pattern: pattern, startNumber: startNumber)
     }
 }
 
@@ -174,10 +179,10 @@ final class DropZoneView: NSView {
         translatesAutoresizingMaskIntoConstraints = false
         registerForDraggedTypes([.fileURL])
 
-        let title = NSTextField(labelWithString: "Drop images or folders here")
+        let title = NSTextField(labelWithString: "Drop images, PDFs or folders here")
         title.font = .systemFont(ofSize: 14, weight: .medium)
         title.textColor = .secondaryLabelColor
-        let hint = NSTextField(labelWithString: "JPEG, PNG, HEIC, TIFF, GIF, WebP, AVIF, BMP")
+        let hint = NSTextField(labelWithString: "JPEG, PNG, HEIC, TIFF, GIF, WebP, AVIF, BMP, PDF")
         hint.font = .systemFont(ofSize: 11)
         hint.textColor = .tertiaryLabelColor
         let open = PillButton(title: "Open files…", primary: false)
@@ -212,7 +217,7 @@ final class DropZoneView: NSView {
         list.distribution = .fill
         summaryLabel.setContentHuggingPriority(.required, for: .vertical)
         scrollView.setContentHuggingPriority(.defaultLow, for: .vertical)
-        let addButton = PillButton(title: "Add images…", primary: false)
+        let addButton = PillButton(title: "Add files…", primary: false)
         addButton.onClick = { [weak self] in self?.onOpen?() }
         let header = NSStackView(views: [summaryLabel, addButton])
         header.orientation = .horizontal
@@ -364,6 +369,9 @@ final class SqueezeWindowController: NSWindowController, NSTableViewDataSource, 
     private let qualitySlider = NSSlider(value: 80, minValue: 1, maxValue: 100, target: nil, action: nil)
     private let qualityLabel = NSTextField(labelWithString: "80")
     private var qualityRows: [NSView] = []
+    private var imageRows: [NSView] = []
+    private var pdfRows: [NSView] = []
+    private let pdfPopup = NSPopUpButton()
     private let maxEdgeField = NSTextField(string: "1920")
     private let subfolderRadio = NSButton(radioButtonWithTitle: "Next to originals (optimized/ subfolder)", target: nil, action: nil)
     private let replaceRadio = NSButton(radioButtonWithTitle: "Replace originals (moved to Trash)", target: nil, action: nil)
@@ -424,6 +432,13 @@ final class SqueezeWindowController: NSWindowController, NSTableViewDataSource, 
         formatPopup.target = self
         formatPopup.action = #selector(formatChanged)
 
+        for resolution in PDFResolution.allCases {
+            pdfPopup.addItem(withTitle: resolution.title)
+            pdfPopup.lastItem?.representedObject = resolution.rawValue
+        }
+        pdfPopup.target = self
+        pdfPopup.action = #selector(pdfDpiChanged)
+
         qualitySlider.target = self
         qualitySlider.action = #selector(qualityChanged)
         qualitySlider.isContinuous = true
@@ -446,16 +461,23 @@ final class SqueezeWindowController: NSWindowController, NSTableViewDataSource, 
         edgeRow.setContentHuggingPriority(.required, for: .horizontal)
 
         let qualityHeading = Self.heading("Quality")
+        let formatHeading = Self.heading("Format")
+        let edgeHeading = Self.heading("Max long edge")
+        let pdfHeading = Self.heading("PDF images")
         qualityRows = [qualityHeading, qualityRow]
-        let left = NSStackView(views: [Self.heading("Format"), formatPopup, qualityHeading, qualityRow, Self.heading("Max long edge"), edgeRow, keepLabel])
+        imageRows = [formatHeading, formatPopup, edgeHeading, edgeRow, keepLabel]
+        pdfRows = [pdfHeading, pdfPopup]
+        let left = NSStackView(views: [formatHeading, formatPopup, pdfHeading, pdfPopup, qualityHeading, qualityRow, edgeHeading, edgeRow, keepLabel])
         left.orientation = .vertical
         left.alignment = .leading
         left.spacing = 6
         left.setCustomSpacing(12, after: formatPopup)
+        left.setCustomSpacing(12, after: pdfPopup)
         left.setCustomSpacing(12, after: qualityRow)
         left.setCustomSpacing(3, after: edgeRow)
         left.widthAnchor.constraint(equalToConstant: 154).isActive = true
         formatPopup.widthAnchor.constraint(equalTo: left.widthAnchor).isActive = true
+        pdfPopup.widthAnchor.constraint(equalTo: left.widthAnchor).isActive = true
         qualityRow.widthAnchor.constraint(equalTo: left.widthAnchor).isActive = true
 
         for radio in [subfolderRadio, replaceRadio, folderRadio] {
@@ -635,6 +657,7 @@ final class SqueezeWindowController: NSWindowController, NSTableViewDataSource, 
 
     private func loadSettings() {
         formatPopup.selectItem(at: OutputFormat.allCases.firstIndex(of: Settings.format) ?? 0)
+        pdfPopup.selectItem(at: PDFResolution.allCases.firstIndex(of: Settings.pdfDpi) ?? 0)
         qualitySlider.integerValue = Settings.quality
         qualityLabel.stringValue = "\(Settings.quality)"
         maxEdgeField.stringValue = "\(Settings.maxEdge)"
@@ -649,20 +672,30 @@ final class SqueezeWindowController: NSWindowController, NSTableViewDataSource, 
         OutputFormat(rawValue: formatPopup.selectedItem?.representedObject as? String ?? "") ?? .webp
     }
 
+    private var hasPDF: Bool { items.contains { ImageCollector.isPDF($0.url) } }
+    private var hasImage: Bool { items.contains { !ImageCollector.isPDF($0.url) } }
+
     private func updateQualityVisibility() {
-        let hidden = selectedFormat == .png
-        for view in qualityRows { view.isHidden = hidden }
+        let pdf = hasPDF
+        let image = hasImage || !pdf
+        for view in imageRows { view.isHidden = !image }
+        for view in pdfRows { view.isHidden = !pdf }
+        let qualityHidden = selectedFormat == .png && !pdf
+        for view in qualityRows { view.isHidden = qualityHidden }
     }
 
     private func updatePreview() {
-        let names = items.map { $0.url.deletingPathExtension().lastPathComponent }
-        previewLabel.stringValue = "→ " + NamePlanner.preview(names: names, pattern: Settings.pattern, start: Settings.startNumber, format: Settings.format)
+        previewLabel.stringValue = "→ " + NamePlanner.preview(files: items.map(\.url), pattern: Settings.pattern, start: Settings.startNumber, format: Settings.format)
     }
 
     @objc private func formatChanged() {
         Settings.format = selectedFormat
         updateQualityVisibility()
         updatePreview()
+    }
+
+    @objc private func pdfDpiChanged() {
+        Settings.pdfDpi = PDFResolution(rawValue: pdfPopup.selectedItem?.representedObject as? String ?? "") ?? .dpi150
     }
 
     @objc private func qualityChanged() {
@@ -784,6 +817,7 @@ final class SqueezeWindowController: NSWindowController, NSTableViewDataSource, 
         log("added \(files.count) files, batch has \(items.count)")
         dropZone.tableView.reloadData()
         applyState()
+        updateQualityVisibility()
         updatePreview()
         show()
     }
@@ -793,7 +827,7 @@ final class SqueezeWindowController: NSWindowController, NSTableViewDataSource, 
         panel.allowsMultipleSelection = true
         panel.canChooseDirectories = true
         panel.canChooseFiles = true
-        panel.allowedContentTypes = [.image, .folder]
+        panel.allowedContentTypes = [.image, .pdf, .folder]
         panel.prompt = "Add"
         show()
         panel.beginSheetModal(for: window!) { [weak self] response in
@@ -821,7 +855,7 @@ final class SqueezeWindowController: NSWindowController, NSTableViewDataSource, 
         optionsStack.alphaValue = running ? 0.5 : 1
         dropZone.showList(!items.isEmpty)
         let total = items.reduce(0) { $0 + $1.bytes }
-        dropZone.summaryLabel.stringValue = "\(items.count) \(items.count == 1 ? "image" : "images") · \(Format.bytes(total))"
+        dropZone.summaryLabel.stringValue = "\(Format.count(items.count, images: !hasPDF)) · \(Format.bytes(total))"
     }
 
     private func startBatch() {
@@ -863,6 +897,7 @@ final class SqueezeWindowController: NSWindowController, NSTableViewDataSource, 
         state = .idle
         dropZone.tableView.reloadData()
         applyState()
+        updateQualityVisibility()
         updatePreview()
     }
 
@@ -888,9 +923,9 @@ final class SqueezeWindowController: NSWindowController, NSTableViewDataSource, 
                 view.detailLabel.textColor = .systemRed
                 view.detailLabel.toolTip = error
             } else {
-                view.detailLabel.stringValue = "\(Format.bytes(item.bytes)) → \(Format.bytes(report.newBytes)) (\(Format.change(from: item.bytes, to: report.newBytes)))"
+                view.detailLabel.stringValue = report.detail
                 view.detailLabel.textColor = .secondaryLabelColor
-                view.detailLabel.toolTip = report.output?.path
+                view.detailLabel.toolTip = report.output?.path ?? "Original kept"
             }
         } else {
             view.detailLabel.stringValue = "\(Format.bytes(item.bytes)) → …"

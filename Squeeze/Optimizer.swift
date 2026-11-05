@@ -1,6 +1,8 @@
 import Foundation
 import ImageIO
 import CoreGraphics
+import Quartz
+import PDFKit
 
 func log(_ message: String) {
     FileHandle.standardError.write(Data(("[Squeeze] " + message + "\n").utf8))
@@ -39,6 +41,13 @@ enum OutputFormat: String, CaseIterable {
     }
 }
 
+enum PDFResolution: String, CaseIterable {
+    case dpi150 = "150", dpi100 = "100", dpi72 = "72", keep
+
+    var title: String { self == .keep ? "Keep" : "\(rawValue) dpi" }
+    var dpi: Int? { Int(rawValue) }
+}
+
 enum Destination: Equatable {
     case subfolder
     case replace
@@ -49,6 +58,7 @@ struct OptimizeOptions {
     var format = OutputFormat.webp
     var quality = 80
     var maxEdge = 1920
+    var pdfDpi = PDFResolution.dpi150
     var destination = Destination.subfolder
     var pattern = NamePlanner.defaultPattern
     var startNumber = 1
@@ -68,9 +78,19 @@ struct FileReport {
     var newBytes = 0
     var originalSize: PixelSize?
     var newSize: PixelSize?
+    var pageCount: Int?
+    var noGain = false
     var error: String?
 
     var succeeded: Bool { error == nil }
+    var isPDF: Bool { ImageCollector.isPDF(source) }
+
+    var detail: String {
+        var text = "\(Format.bytes(originalBytes)) → \(Format.bytes(newBytes)) (\(Format.change(from: originalBytes, to: newBytes)))"
+        if let pageCount { text = "\(pageCount) \(pageCount == 1 ? "page" : "pages"), " + text }
+        if noGain { text += " (no gain)" }
+        return text
+    }
 }
 
 struct BatchReport {
@@ -86,7 +106,7 @@ struct BatchReport {
 
     var summary: String {
         let done = succeeded
-        var text = "\(done.count) \(done.count == 1 ? "image" : "images")"
+        var text = Format.count(done.count, images: !files.contains { $0.isPDF })
         if !done.isEmpty {
             text += ", \(Format.bytes(originalBytes)) → \(Format.bytes(newBytes)) (\(Format.change(from: originalBytes, to: newBytes)))"
         }
@@ -124,6 +144,11 @@ enum Format {
     static func seconds(_ interval: TimeInterval) -> String {
         String(format: "%.1f s", interval)
     }
+
+    static func count(_ number: Int, images: Bool) -> String {
+        let noun = images ? "image" : "file"
+        return "\(number) \(noun)\(number == 1 ? "" : "s")"
+    }
 }
 
 enum ImageCollector {
@@ -134,12 +159,20 @@ enum ImageCollector {
         extensions.contains(url.pathExtension.lowercased())
     }
 
+    static func isPDF(_ url: URL) -> Bool {
+        url.pathExtension.lowercased() == "pdf"
+    }
+
+    static func isSupported(_ url: URL) -> Bool {
+        isImage(url) || isPDF(url)
+    }
+
     static func isDirectory(_ url: URL) -> Bool {
         (try? url.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory == true
     }
 
     static func accepts(_ url: URL) -> Bool {
-        isDirectory(url) || isImage(url)
+        isDirectory(url) || isSupported(url)
     }
 
     static func collect(_ urls: [URL]) -> [URL] {
@@ -154,7 +187,7 @@ enum ImageCollector {
         for url in urls {
             if isDirectory(url) {
                 for file in filesInFolder(url) { add(file) }
-            } else if isImage(url) {
+            } else if isSupported(url) {
                 add(url)
             }
         }
@@ -169,7 +202,7 @@ enum ImageCollector {
                 if url.lastPathComponent == outputFolderName { enumerator.skipDescendants() }
                 continue
             }
-            if isImage(url) { files.append(url) }
+            if isSupported(url) { files.append(url) }
         }
         return files.sorted { $0.path.localizedStandardCompare($1.path) == .orderedAscending }
     }
@@ -193,9 +226,11 @@ enum NamePlanner {
         }
     }
 
-    static func preview(names: [String], pattern: String, start: Int, format: OutputFormat) -> String {
-        let bases = baseNames(for: names.isEmpty ? sampleNames : names, pattern: pattern, start: start)
-        return bases.prefix(2).map { "\($0).\(format.fileExtension)" }.joined(separator: ", ")
+    static func preview(files: [URL], pattern: String, start: Int, format: OutputFormat) -> String {
+        let names = files.isEmpty ? sampleNames : files.map { $0.deletingPathExtension().lastPathComponent }
+        let extensions = files.isEmpty ? sampleNames.map { _ in format.fileExtension } : files.map { ImageCollector.isPDF($0) ? "pdf" : format.fileExtension }
+        let bases = baseNames(for: names, pattern: pattern, start: start)
+        return zip(bases, extensions).prefix(2).map { "\($0).\($1)" }.joined(separator: ", ")
     }
 
     private static func padded(_ number: Int, _ digits: Int) -> String {
@@ -421,6 +456,135 @@ enum MetadataStripper {
     }
 }
 
+enum PDFCompressor {
+    static func filter(quality: Int, maxPixels: Int?) throws -> QuartzFilter {
+        var image: [String: Any] = [
+            "Compression Quality": Double(min(max(quality, 1), 100)) / 100,
+            "ImageCompression": "ImageJPEGCompress",
+        ]
+        if let maxPixels {
+            image["ImageScaleSettings"] = ["ImageScaleFactor": 1.0, "ImageSizeMax": maxPixels, "ImageSizeMin": 128, "ImageScaleInterpolate": true]
+        }
+        let properties: [AnyHashable: Any] = [
+            "Domains": ["Applications": true],
+            "FilterType": 1,
+            "Name": "Squeeze",
+            "FilterData": ["ColorSettings": ["ImageSettings": image]],
+        ]
+        guard let filter = QuartzFilter(properties: properties) else { throw OptimizeError("Could not create PDF filter") }
+        return filter
+    }
+
+    static func maxPixels(in document: PDFDocument, dpi: Int) -> Int {
+        var longest: CGFloat = 0
+        for index in 0..<document.pageCount {
+            guard let page = document.page(at: index) else { continue }
+            let box = page.bounds(for: .cropBox)
+            longest = max(longest, box.width, box.height)
+        }
+        return max(Int((longest / 72 * CGFloat(dpi)).rounded()), 128)
+    }
+
+    static func rotationTransform(_ page: PDFPage) -> CGAffineTransform {
+        let box = page.bounds(for: .cropBox)
+        switch ((page.rotation % 360) + 360) % 360 {
+        case 90: return CGAffineTransform(a: 0, b: -1, c: 1, d: 0, tx: 0, ty: box.width)
+        case 180: return CGAffineTransform(a: -1, b: 0, c: 0, d: -1, tx: box.width, ty: box.height)
+        case 270: return CGAffineTransform(a: 0, b: 1, c: -1, d: 0, tx: box.height, ty: 0)
+        default: return .identity
+        }
+    }
+
+    static func open(_ source: URL) throws -> PDFDocument {
+        guard let document = PDFDocument(url: source) else { throw OptimizeError("Not a readable PDF") }
+        if document.isEncrypted || document.isLocked {
+            log("\(source.lastPathComponent): encrypted PDF (locked: \(document.isLocked)), skipped")
+            throw OptimizeError("Encrypted PDF skipped")
+        }
+        guard document.pageCount > 0, document.page(at: 0) != nil else { throw OptimizeError("PDF has no pages") }
+        return document
+    }
+
+    static func compress(_ document: PDFDocument, to output: URL, resolution: PDFResolution, quality: Int) throws -> Int {
+        let pageCount = document.pageCount
+        guard let first = document.page(at: 0) else { throw OptimizeError("PDF has no pages") }
+        let filter = try filter(quality: quality, maxPixels: resolution.dpi.map { maxPixels(in: document, dpi: $0) })
+        var mediaBox = first.bounds(for: .cropBox)
+        let info: [CFString: Any] = [kCGPDFContextTitle: "", kCGPDFContextAuthor: "", kCGPDFContextSubject: "", kCGPDFContextKeywords: "", kCGPDFContextCreator: ""]
+        guard let context = CGContext(output as CFURL, mediaBox: &mediaBox, info as CFDictionary) else {
+            throw OptimizeError("Could not create PDF output")
+        }
+        filter.apply(to: context)
+        let transforms = (0..<pageCount).map { index -> CGAffineTransform in
+            guard let page = document.page(at: index) else { return .identity }
+            let crop = page.bounds(for: .cropBox)
+            return CGAffineTransform(translationX: -crop.minX, y: -crop.minY).concatenating(rotationTransform(page))
+        }
+        for index in 0..<pageCount {
+            guard let page = document.page(at: index) else { continue }
+            let bounds = page.bounds(for: .cropBox)
+            let swapped = page.rotation % 180 != 0
+            var box = CGRect(x: 0, y: 0, width: swapped ? bounds.height : bounds.width, height: swapped ? bounds.width : bounds.height)
+            let transform = rotationTransform(page)
+            page.rotation = 0
+            let pageInfo = [kCGPDFContextMediaBox as String: Data(bytes: &box, count: MemoryLayout<CGRect>.size)] as CFDictionary
+            context.beginPDFPage(pageInfo)
+            context.saveGState()
+            context.concatenate(transform)
+            page.draw(with: .cropBox, to: context)
+            context.restoreGState()
+            context.endPDFPage()
+        }
+        context.closePDF()
+        try copyLinks(from: document, to: output, transforms: transforms)
+        return pageCount
+    }
+
+    static func copyLinks(from document: PDFDocument, to output: URL, transforms: [CGAffineTransform]) throws {
+        let links = (0..<document.pageCount).map { document.page(at: $0)?.annotations.filter { $0.type == "Link" } ?? [] }
+        guard links.contains(where: { !$0.isEmpty }) || document.outlineRoot != nil else { return }
+        guard let copy = PDFDocument(url: output) else { throw OptimizeError("Could not reopen PDF output") }
+        func remap(_ destination: PDFDestination?) -> PDFDestination? {
+            guard let destination, let page = destination.page else { return nil }
+            let index = document.index(for: page)
+            guard index < transforms.count, let target = copy.page(at: index) else { return nil }
+            let point = destination.point
+            let unspecified = point.x == kPDFDestinationUnspecifiedValue || point.y == kPDFDestinationUnspecifiedValue
+            return PDFDestination(page: target, at: unspecified ? point : point.applying(transforms[index]))
+        }
+        var count = 0
+        for (index, annotations) in links.enumerated() {
+            guard let target = copy.page(at: index) else { continue }
+            for annotation in annotations {
+                let link = PDFAnnotation(bounds: annotation.bounds.applying(transforms[index]), forType: .link, withProperties: nil)
+                link.border = annotation.border
+                link.url = annotation.url
+                if let destination = remap(annotation.destination) { link.destination = destination }
+                target.addAnnotation(link)
+                count += 1
+            }
+        }
+        func copyOutline(_ source: PDFOutline) -> PDFOutline {
+            let outline = PDFOutline()
+            outline.label = source.label
+            if let destination = remap(source.destination) { outline.destination = destination }
+            if let action = source.action as? PDFActionURL, let url = action.url { outline.action = PDFActionURL(url: url) }
+            for child in 0..<source.numberOfChildren {
+                if let item = source.child(at: child) { outline.insertChild(copyOutline(item), at: child) }
+            }
+            return outline
+        }
+        if let root = document.outlineRoot { copy.outlineRoot = copyOutline(root) }
+        let temporary = output.deletingLastPathComponent().appendingPathComponent(".squeeze-\(UUID().uuidString).pdf")
+        guard copy.write(to: temporary) else {
+            try? FileManager.default.removeItem(at: temporary)
+            throw OptimizeError("Could not write PDF links")
+        }
+        _ = try FileManager.default.replaceItemAt(output, withItemAt: temporary)
+        log("\(document.documentURL?.lastPathComponent ?? output.lastPathComponent): restored \(count) link(s)\(document.outlineRoot == nil ? "" : " and outline")")
+    }
+}
+
 final class Optimizer {
     struct Job {
         let source: URL
@@ -456,7 +620,7 @@ final class Optimizer {
             var suffix = 1
             while true {
                 let name = suffix == 1 ? base : "\(base)-\(suffix)"
-                let candidate = directory.appendingPathComponent(name).appendingPathExtension(options.format.fileExtension)
+                let candidate = directory.appendingPathComponent(name).appendingPathExtension(ImageCollector.isPDF(source) ? "pdf" : options.format.fileExtension)
                 let key = candidate.standardizedFileURL.path.lowercased()
                 let replacesItself = options.destination == .replace && key == sourceKey
                 let taken = used.contains(key) || (!replacesItself && FileManager.default.fileExists(atPath: candidate.path))
@@ -472,6 +636,7 @@ final class Optimizer {
     }
 
     static func process(_ job: Job, options: OptimizeOptions) -> FileReport {
+        if ImageCollector.isPDF(job.source) { return processPDF(job, options: options) }
         var report = FileReport(source: job.source)
         report.originalBytes = fileSize(job.source)
         do {
@@ -487,6 +652,49 @@ final class Optimizer {
             log("\(job.source.lastPathComponent): \(error.localizedDescription)")
         }
         return report
+    }
+
+    private static func processPDF(_ job: Job, options: OptimizeOptions) -> FileReport {
+        var report = FileReport(source: job.source)
+        report.originalBytes = fileSize(job.source)
+        let manager = FileManager.default
+        let directory = job.output.deletingLastPathComponent()
+        let temporary = directory.appendingPathComponent(".squeeze-\(UUID().uuidString).pdf")
+        do {
+            let document = try PDFCompressor.open(job.source)
+            try manager.createDirectory(at: directory, withIntermediateDirectories: true)
+            report.pageCount = try PDFCompressor.compress(document, to: temporary, resolution: options.pdfDpi, quality: options.quality)
+            let newBytes = fileSize(temporary)
+            report.noGain = newBytes >= report.originalBytes
+            if report.noGain && options.destination == .replace {
+                try? manager.removeItem(at: temporary)
+                report.newBytes = report.originalBytes
+                log("\(job.source.lastPathComponent): no gain, original kept")
+                return report
+            }
+            try move(temporary, job: job, options: options)
+            report.output = job.output
+            report.newBytes = newBytes
+        } catch {
+            try? manager.removeItem(at: temporary)
+            report.error = error.localizedDescription
+            log("\(job.source.lastPathComponent): \(error.localizedDescription)")
+        }
+        return report
+    }
+
+    private static func move(_ temporary: URL, job: Job, options: OptimizeOptions) throws {
+        let manager = FileManager.default
+        let replacesItself = options.destination == .replace && job.output.standardizedFileURL.path.lowercased() == job.source.standardizedFileURL.path.lowercased()
+        if replacesItself {
+            try manager.trashItem(at: job.source, resultingItemURL: nil)
+            try manager.moveItem(at: temporary, to: job.output)
+        } else {
+            try manager.moveItem(at: temporary, to: job.output)
+            if options.destination == .replace {
+                try manager.trashItem(at: job.source, resultingItemURL: nil)
+            }
+        }
     }
 
     private static func write(_ data: Data, job: Job, options: OptimizeOptions) throws {
@@ -577,6 +785,9 @@ enum CLI {
             case "--quality":
                 guard let value = next(argument), let number = Int(value) else { return usage() }
                 options.quality = number
+            case "--pdf-dpi":
+                guard let value = next(argument), let resolution = PDFResolution(rawValue: value.lowercased()) else { return usage() }
+                options.pdfDpi = resolution
             case "--out":
                 guard let value = next(argument) else { return usage() }
                 options.destination = .folder(URL(fileURLWithPath: value, isDirectory: true))
@@ -599,13 +810,13 @@ enum CLI {
         }
         let files = ImageCollector.collect(inputs)
         guard !files.isEmpty else {
-            print("No images found")
+            print("No images or PDFs found")
             return 1
         }
         let optimizer = Optimizer(callbackQueue: DispatchQueue(label: "cz.vojtechokenka.squeeze.cli"))
         let done = DispatchSemaphore(value: 0)
         var batch: BatchReport?
-        print("\(files.count) \(files.count == 1 ? "image" : "images") → \(options.format.title), quality \(options.quality), max edge \(options.maxEdge == 0 ? "unchanged" : "\(options.maxEdge) px"), pattern \(options.pattern)")
+        print("\(Format.count(files.count, images: !files.contains { ImageCollector.isPDF($0) })) → \(options.format.title), quality \(options.quality), max edge \(options.maxEdge == 0 ? "unchanged" : "\(options.maxEdge) px"), PDF images \(options.pdfDpi.title.lowercased()), pattern \(options.pattern)")
         optimizer.run(files: files, options: options, progress: { _, _, _ in }, completion: { report in
             batch = report
             done.signal()
@@ -618,16 +829,19 @@ enum CLI {
                 print("\(name)  error: \(error)")
                 continue
             }
+            if file.isPDF {
+                print("\(name)  \(file.detail)  → \(file.output?.path ?? "kept original")")
+                continue
+            }
             let sizes = "\(file.originalSize?.text ?? "?") → \(file.newSize?.text ?? "?")"
-            let bytes = "\(Format.bytes(file.originalBytes)) → \(Format.bytes(file.newBytes)) (\(Format.change(from: file.originalBytes, to: file.newBytes)))"
-            print("\(name)  \(sizes)  \(bytes)  → \(file.output?.path ?? "?")")
+            print("\(name)  \(sizes)  \(file.detail)  → \(file.output?.path ?? "?")")
         }
         print("Total: \(report.summary), \(Format.seconds(report.duration))")
         return report.failed.isEmpty ? 0 : 1
     }
 
     private static func usage() -> Int32 {
-        print("usage: Squeeze --cli [--format webp|avif|jpeg|png] [--quality 1-100] [--width px] [--out dir | --replace | --subfolder] [--pattern \"opt-{name}\"] [--start n] files…")
+        print("usage: Squeeze --cli [--format webp|avif|jpeg|png] [--quality 1-100] [--width px] [--pdf-dpi 150|100|72|keep] [--out dir | --replace | --subfolder] [--pattern \"opt-{name}\"] [--start n] files…")
         return 2
     }
 }

@@ -5,7 +5,7 @@ APP="build/Squeeze.app"
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS"
 SOURCES=(main.swift Optimizer.swift)
-FRAMEWORKS=(-framework AppKit -framework ImageIO -framework CoreGraphics -framework UniformTypeIdentifiers -framework UserNotifications)
+FRAMEWORKS=(-framework AppKit -framework ImageIO -framework CoreGraphics -framework UniformTypeIdentifiers -framework UserNotifications -framework Quartz -framework PDFKit)
 WEBP=(-import-objc-header webp-bridge.h -I vendor/libwebp/include)
 ARM_LIBS=(vendor/libwebp/lib/arm64/libwebp.a vendor/libwebp/lib/arm64/libsharpyuv.a)
 X86_LIBS=(vendor/libwebp/lib/x86_64/libwebp.a vendor/libwebp/lib/x86_64/libsharpyuv.a)

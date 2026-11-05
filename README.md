@@ -7,7 +7,7 @@ Three small menu bar utilities for macOS, written in plain Swift and built with 
 | **Hub** | Per-app volume mixer with live meters, a night mode that hard-caps loudness, a sleep timer that fades audio out and puts the Mac to sleep, screen dimming below the system minimum (⌘ + brightness keys), and a stay-awake timer. |
 | **Todo** | A to-do list in the menu bar backed by a plain Markdown file. Projects (`Project; task`), deadlines with a countdown, ⌃⌥N to add a task from anywhere. |
 | **Picker** | Color picker: click the icon or press ⌃⌥C to sample any pixel with the system loupe; HEX / RGB / HSL in copyable chips, history of the last 12 colors. |
-| **Squeeze** | Image optimizer for the web: drop images or folders on the menu bar icon, pick WebP / AVIF / JPEG / PNG, max size and quality, strip metadata, rename with Figma-style tokens, save next to the originals, replace them, or into a folder of your choice. |
+| **Squeeze** | Image and PDF optimizer for the web: drop images, PDFs or folders on the menu bar icon, pick WebP / AVIF / JPEG / PNG, max size and quality, strip metadata, rename with Figma-style tokens, save next to the originals, replace them, or into a folder of your choice. PDFs keep their text and vectors sharp while the embedded images are downsampled. |
 
 ## Requirements
 
@@ -82,7 +82,8 @@ The apps are ad-hoc signed, not notarized. Prebuilt downloads therefore need the
 
 ## Squeeze
 
-- Drop files or folders on the menu bar icon, or open the window (left click) and drop them there / use Add images…. Options: format (WebP by default, encoded with the bundled [libwebp](https://developers.google.com/speed/webp), BSD license; AVIF/JPEG/PNG via ImageIO), quality, max long edge (never upscales), destination (next to the originals in `optimized/`, replace the originals — they go to the Trash — or a chosen folder, optionally grouped into an `optimized/` subfolder), and a rename pattern with `{name}`, `{n}` and `{n-}` tokens (default `opt-{name}`). EXIF/GPS/ICC metadata is stripped; orientation and alpha are preserved.
+- Drop files or folders on the menu bar icon, or open the window (left click) and drop them there / use Add files…. Options: format (WebP by default, encoded with the bundled [libwebp](https://developers.google.com/speed/webp), BSD license; AVIF/JPEG/PNG via ImageIO), quality, max long edge (never upscales), destination (next to the originals in `optimized/`, replace the originals — they go to the Trash — or a chosen folder, optionally grouped into an `optimized/` subfolder), and a rename pattern with `{name}`, `{n}` and `{n-}` tokens (default `opt-{name}`). EXIF/GPS/ICC metadata is stripped; orientation and alpha are preserved.
+- PDFs: text, vectors, links and bookmarks are kept; embedded images are downsampled to 150 / 100 / 72 dpi (or kept) and recompressed with the quality slider; document metadata is removed. Purely vector PDFs gain little, encrypted PDFs are skipped, forms and comments are not carried over. If the result would not be smaller, the original is left alone.
 - Right click: Open files…, Settings…, Quit. The window shows a summary ("12 images, 38.4 MB → 2.1 MB") and can reveal the results in Finder.
 
 ## License
