@@ -17,6 +17,7 @@ Contents of this folder:
 | `DSPanel.swift` | `DSPanel`, `DSSurface` |
 | `Snapshot.swift` | `DSSnapshot` |
 | `DSBrand.swift` | `DSBrand`: logo and the "by Vojtěch Okénka" menu row |
+| `DSBubble.swift` | `DSBubble`: small inverted note for "Copied" and hover hints |
 | `Fonts/` | `GoogleSansFlex.ttf` (original variable font) and its `OFL.txt` |
 | `Demo/main.swift`, `build-demo.sh` | gallery CLI, not compiled into the apps |
 | `NOTICE.md` | font and icon credits |
@@ -120,7 +121,7 @@ Type scale of the mock: title 16/20 weight 500, text 13/16 weight 400, countdown
 
 ## 3. Icons: `DSIcon`
 
-Cases: `.contrast`, `.coffee`, `.volumeUp`, `.timer`, `.calendarToday`, `.edit`, `.close`, `.sort`, `.replay`, `.delete`, `.check`, `.image`, `.description`. `DSIcon.allCases` lists them.
+Cases: `.contrast`, `.coffee`, `.volumeUp`, `.timer`, `.calendarToday`, `.edit`, `.close`, `.sort`, `.replay`, `.delete`, `.check`, `.image`, `.description`, `.info`. `DSIcon.allCases` lists them.
 
 ```swift
 let template = DSIcon.timer.image(size: 18)                    // template NSImage, tint with contentTintColor
@@ -412,6 +413,23 @@ let task = DSLabel(item.text)
 task.maxLines = 0
 task.lineHeight = 20
 task.frame = NSRect(x: 44, y: 6, width: textWidth, height: task.height(forWidth: textWidth))
+```
+
+### DSBubble
+
+```swift
+init(_ text: String, title: String? = nil)
+```
+
+A small inverted note (ink background, paper text, 11 pt, radius 4) for transient feedback and hover hints. Without a title it is one line, 18 pt high ("Copied"). With a title it shows the muted title over the text, which wraps at `maxWidth` (default 220). It sizes itself (`frame.size` is set on init and whenever `text` or `maxWidth` changes), never receives mouse events, and is not shown or hidden by the kit: add it as a subview above the content, position it, and remove or hide it yourself.
+
+```swift
+let note = DSBubble("Copied")
+note.setFrameOrigin(NSPoint(x: chip.frame.midX - note.frame.width / 2, y: chip.frame.minY - 4 - note.frame.height))
+content.addSubview(note)
+DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { [weak note] in note?.removeFromSuperview() }
+
+let formats = DSBubble("JPEG, PNG, HEIC, TIFF, GIF, WebP, AVIF, BMP and PDF", title: "Supported formats")
 ```
 
 ### DSBrand
