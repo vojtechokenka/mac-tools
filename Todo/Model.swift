@@ -20,6 +20,30 @@ enum HideDoneMode: String {
     var threshold: TimeInterval { self == .immediately ? 0 : 24 * 3600 }
 }
 
+enum SortOrder: String, CaseIterable {
+    case added
+    case deadline
+    case alphabetical = "az"
+
+    static let defaultsKey = "sortOrder"
+    static let groupingKey = "groupByProject"
+
+    var title: String {
+        switch self {
+        case .added: return "Added"
+        case .deadline: return "Deadline"
+        case .alphabetical: return "A\u{2013}Z"
+        }
+    }
+}
+
+enum DeadlineTone {
+    case overdue
+    case today
+    case soon
+    case later
+}
+
 struct Day: Hashable, Comparable {
     var year: Int
     var month: Int
@@ -169,6 +193,7 @@ struct TodoItem: Equatable {
     }
 
     var source: String { project.map { $0 + "; " + text } ?? text }
+    var editLine: String { source + (due.map { " @" + $0.iso } ?? "") }
     var projectKey: String? { project?.lowercased() }
 
     var line: String {
@@ -176,6 +201,18 @@ struct TodoItem: Equatable {
         if let due { result += " @" + due.iso }
         if let completed { result += " ✓" + completed.iso }
         return result
+    }
+
+    func applyingEdit(_ line: String) -> TodoItem? {
+        let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed != editLine else { return nil }
+        let edited = TodoItem(source: trimmed)
+        guard !edited.text.isEmpty, edited.text != ";" else { return nil }
+        var result = self
+        result.project = edited.project
+        result.text = edited.text
+        result.due = edited.due
+        return result == self ? nil : result
     }
 
     mutating func setDone(_ value: Bool, now: Date) {
@@ -286,17 +323,29 @@ struct Document: Equatable {
         return matches.indices.contains(ref.occurrence) ? matches[ref.occurrence] : matches.first
     }
 
-    private func sortedIndices(_ indices: [Int]) -> [Int] {
+    private func sortedIndices(_ indices: [Int], by order: SortOrder) -> [Int] {
         indices.sorted { lhs, rhs in
             let a = tasks[lhs], b = tasks[rhs]
             if a.done != b.done { return !a.done }
-            let dueA = a.due ?? .distantFuture, dueB = b.due ?? .distantFuture
-            if dueA != dueB { return dueA < dueB }
+            switch order {
+            case .added:
+                break
+            case .deadline:
+                let dueA = a.due ?? .distantFuture, dueB = b.due ?? .distantFuture
+                if dueA != dueB { return dueA < dueB }
+            case .alphabetical:
+                let order = a.text.compare(b.text, options: [.caseInsensitive], range: nil, locale: Document.collationLocale)
+                if order != .orderedSame { return order == .orderedAscending }
+            }
             return lhs < rhs
         }
     }
 
-    func groups() -> [TaskGroup] {
+    func sortedTaskIndices(by order: SortOrder) -> [Int] {
+        sortedIndices(Array(tasks.indices), by: order)
+    }
+
+    func groups(sortedBy order: SortOrder = .deadline) -> [TaskGroup] {
         var titles: [String: String] = [:]
         var members: [String: [Int]] = [:]
         var loose: [Int] = []
@@ -309,14 +358,14 @@ struct Document: Equatable {
             }
         }
         var groups = members.map { key, indices in
-            TaskGroup(title: titles[key] ?? key, key: key, indices: sortedIndices(indices), openCount: indices.filter { !tasks[$0].done }.count)
+            TaskGroup(title: titles[key] ?? key, key: key, indices: sortedIndices(indices, by: order), openCount: indices.filter { !tasks[$0].done }.count)
         }
         groups.sort { lhs, rhs in
             let order = lhs.title.compare(rhs.title, options: [.caseInsensitive], range: nil, locale: Document.collationLocale)
             return order == .orderedSame ? (lhs.key ?? "") < (rhs.key ?? "") : order == .orderedAscending
         }
         if !loose.isEmpty {
-            groups.append(TaskGroup(title: Document.noProjectTitle, key: nil, indices: sortedIndices(loose), openCount: loose.filter { !tasks[$0].done }.count))
+            groups.append(TaskGroup(title: Document.noProjectTitle, key: nil, indices: sortedIndices(loose, by: order), openCount: loose.filter { !tasks[$0].done }.count))
         }
         return groups
     }
@@ -453,22 +502,33 @@ enum DateInput {
         return (text, due)
     }
 
-    static func countdown(due: Day?, today: Day) -> (text: String, urgency: Int) {
-        guard let due else { return ("", 0) }
+    static func countdown(due: Day?, today: Day) -> (text: String, tone: DeadlineTone)? {
+        guard let due else { return nil }
         let days = today.days(until: due)
         switch days {
-        case 0: return ("Today", 2)
-        case 1: return ("Tomorrow", 2)
-        case 2...3: return ("\(days) days", 1)
-        case 4...: return ("\(days) days", 0)
-        case -1: return ("1 day ago", 2)
-        default: return ("\(-days) days ago", 2)
+        case 0: return ("Today", .today)
+        case 1: return ("Tomorrow", .soon)
+        case 2...3: return ("\(days) days", .soon)
+        case 4...: return ("\(days) days", .later)
+        case -1: return ("1 day ago", .overdue)
+        default: return ("\(-days) days ago", .overdue)
+        }
+    }
+
+    static func doneLabel(_ completed: Stamp?, today: Day) -> String {
+        guard let completed else { return "Done" }
+        let days = completed.day.days(until: today)
+        switch days {
+        case ...0: return "Done today"
+        case 1: return "Done yesterday"
+        default: return "Done \(days) days ago"
         }
     }
 }
 
 final class TaskStore {
     let path: String
+    let isReadOnly: Bool
     private(set) var document = Document()
     var onExternalChange: (() -> Void)?
     var onWillReload: (() -> Void)?
@@ -481,9 +541,17 @@ final class TaskStore {
 
     init(path: String) {
         self.path = path
+        isReadOnly = false
+    }
+
+    init(sample: Document) {
+        path = ""
+        isReadOnly = true
+        document = sample
     }
 
     func load() {
+        guard !isReadOnly else { return }
         guard FileManager.default.fileExists(atPath: path) else {
             document = Document()
             write()
@@ -495,6 +563,7 @@ final class TaskStore {
 
     @discardableResult
     func mutate(_ change: (inout Document) -> Void) -> Bool {
+        guard !isReadOnly else { return false }
         if diskChanged() {
             log("file changed externally, reloading before write")
             readFromDisk()
@@ -512,6 +581,7 @@ final class TaskStore {
     }
 
     func checkForExternalChange() {
+        guard !isReadOnly else { return }
         guard diskChanged() else { return }
         log("task file changed externally, reloading")
         onWillReload?()
@@ -520,6 +590,7 @@ final class TaskStore {
     }
 
     func startWatching() {
+        guard !isReadOnly else { return }
         let directory = (path as NSString).deletingLastPathComponent
         let descriptor = open(directory, O_EVTONLY)
         if descriptor >= 0 {
