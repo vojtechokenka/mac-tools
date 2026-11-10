@@ -4,7 +4,7 @@ import Carbon.HIToolbox
 final class FigmaPivotKey {
     private static let bundleID = "com.figma.Desktop"
     private static let menuTitle = "Plugins"
-    private static let itemTitle = "Nastavit pivot"
+    private static let itemTitle = "Set pivot"
     private var tap: CFMachPort?
     private var trustPoll: Timer?
     private var activation: NSObjectProtocol?
