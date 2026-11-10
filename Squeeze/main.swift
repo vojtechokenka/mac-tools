@@ -1017,8 +1017,8 @@ final class SqueezeWindowController: NSWindowController, NSTextFieldDelegate, NS
         if qualityRowVisible {
             row(20) { top in
                 label(qualityLabel, top, 20)
-                place(qualitySlider, NSRect(x: fieldX, y: top, width: fieldWidth - 34, height: 20))
-                place(qualityValue, NSRect(x: fieldX + fieldWidth - 24, y: top + 2, width: 24, height: 16))
+                place(qualitySlider, NSRect(x: fieldX, y: top, width: fieldWidth - 40, height: 20))
+                place(qualityValue, NSRect(x: fieldX + fieldWidth - 30, y: top + 2, width: 30, height: 16))
             }
         }
         if imageRowsVisible {
