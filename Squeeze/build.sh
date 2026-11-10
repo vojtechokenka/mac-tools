@@ -3,8 +3,8 @@ set -e
 cd "$(dirname "$0")"
 APP="build/Squeeze.app"
 rm -rf "$APP"
-mkdir -p "$APP/Contents/MacOS"
-SOURCES=(main.swift Optimizer.swift)
+mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
+SOURCES=(main.swift Optimizer.swift ../Shared/*.swift)
 FRAMEWORKS=(-framework AppKit -framework ImageIO -framework CoreGraphics -framework UniformTypeIdentifiers -framework UserNotifications -framework Quartz -framework PDFKit)
 WEBP=(-import-objc-header webp-bridge.h -I vendor/libwebp/include)
 ARM_LIBS=(vendor/libwebp/lib/arm64/libwebp.a vendor/libwebp/lib/arm64/libsharpyuv.a)
@@ -29,6 +29,7 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
   <key>CFBundleName</key><string>Squeeze</string>
   <key>CFBundleIdentifier</key><string>cz.vojtechokenka.squeeze</string>
   <key>CFBundleExecutable</key><string>Squeeze</string>
+  <key>CFBundleIconFile</key><string>AppIcon</string>
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleShortVersionString</key><string>1.0</string>
   <key>LSMinimumSystemVersion</key><string>14.0</string>
@@ -36,5 +37,8 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
 </dict>
 </plist>
 PLIST
+cp ../Shared/Fonts/GoogleSansFlex.ttf "$APP/Contents/Resources/GoogleSansFlex.ttf"
+cp ../Shared/Fonts/OFL.txt "$APP/Contents/Resources/GoogleSansFlex-OFL.txt"
+if [[ -f AppIcon.icns ]]; then cp AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"; fi
 codesign --force --sign - "$APP"
 echo "Built $APP"

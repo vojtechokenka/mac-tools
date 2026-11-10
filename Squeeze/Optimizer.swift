@@ -132,6 +132,7 @@ enum Format {
             index += 1
         }
         if index == 0 { return "\(count) B" }
+        if index == 1 { return String(format: "%.0f KB", value) }
         return String(format: "%.1f %@", value, units[index])
     }
 
