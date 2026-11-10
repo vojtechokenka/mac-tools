@@ -482,7 +482,7 @@ Behavior:
 - For the Picker HUD: `takesKeyFocus = false`, `closesOnOutsideClick = false`, optionally `isMovable = true` and `isMovableByWindowBackground = true`, then `show(at:)`.
 
 ```swift
-let panel = DSPanel(width: 300, content: rootView)
+let panel = DSPanel(width: 360, content: rootView)
 panel.maxHeight = 640
 panel.onClose = { [weak self] in self?.stopMeters() }
 
@@ -497,7 +497,7 @@ panel.onClose = { [weak self] in self?.stopMeters() }
 }
 
 func rowsChanged() {
-    rootView.setFrameSize(NSSize(width: 300, height: newHeight))
+    rootView.setFrameSize(NSSize(width: 360, height: newHeight))
     panel.sizeToContent()
 }
 ```
@@ -568,7 +568,7 @@ The branch exits before any status item, hot key or audio setup runs, so it has 
 
 ## 9. Layout numbers from the mock
 
-- Hub panel, width 300: 4 pt above the first and below the last section. Section: 12 pt top padding, rows 10 pt apart, 14 pt bottom padding, a 1 pt `DSSeparator` between sections. Row order in a section: `DSSectionHeader` (16), then controls. Label + control rows are 20 pt high; the name column is 126 pt wide (or a 16 pt app icon, 10 pt gap and a 100 pt name), then a 10 pt gap, then the slider, so all sliders share one column.
+- Hub panel, width 360: 4 pt above the first and below the last section. Section: 12 pt top padding, rows 10 pt apart, 14 pt bottom padding, a 1 pt `DSSeparator` between sections. Row order in a section: `DSSectionHeader` (16), then controls. Label + control rows are 20 pt high; the name column is 126 pt wide (or a 16 pt app icon, 10 pt gap and a 100 pt name), then a 10 pt gap, then the slider (150 pt), then 6 pt and a 36 pt value column (app volume in percent, 11 pt muted, right-aligned; empty in the output row), so all sliders share one column.
 - Timer block: two `DSStepper`s side by side with a 10 pt gap, 10 pt below them a full-width primary `DSButton`. Running state: a row with a muted label on the left and the countdown (13 pt, weight 600, `DS.ink`) on the right, then a full-width secondary "Cancel".
 - Todo panel, width 420: 12 pt top and 8 pt bottom padding. Add row: text field 32 pt high, 6 pt gaps, two icon buttons. Task row: 6 pt vertical and 16 pt side padding, 16 pt checkbox, 12 pt gap, text with a 20 pt line height, small deadline tag 3 pt below the text, checkbox centered on text + tag. Row hover is `DS.sunken`.
 - Picker HUD: 360 x 132, the swatch fills the left 132 pt, then a 20 pt gap, value rows 8 pt apart, an 11 pt muted format label 30 pt wide, chips 6 pt apart, close icon button 8 pt from the top right corner.

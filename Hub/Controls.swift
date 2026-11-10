@@ -137,6 +137,7 @@ final class AppRow {
     let icon = NSImageView()
     let label: DSLabel
     let slider: DSSlider
+    let value = DSLabel("", size: 11, color: DS.muted)
     private var level = MeterLevel()
     private var gainSquare: Float?
 
@@ -148,14 +149,16 @@ final class AppRow {
         icon.image = app.icon
         icon.imageScaling = .scaleProportionallyUpOrDown
         icon.setAccessibilityElement(false)
+        value.alignment = .right
         showPercent(percent)
     }
 
-    var views: [NSView] { [icon, label, slider] }
+    var views: [NSView] { [icon, label, slider, value] }
 
     func showPercent(_ percent: Double) {
         slider.value = percent
-        slider.toolTip = "\(Int(percent.rounded())) %"
+        value.text = "\(Int(percent.rounded())) %"
+        slider.toolTip = value.text
     }
 
     func resetLevel() {
@@ -180,6 +183,7 @@ final class AppRow {
 final class AudioSection: PanelSection {
     static let nameWidth: CGFloat = 126
     static let iconSize: CGFloat = 16
+    static let percentWidth: CGFloat = 36
     static let valueWidth: CGFloat = 60
     static let noteText = "This device doesn't report its volume: the cap and meter are relative to full scale — keep the headphone volume steady"
 
@@ -233,6 +237,7 @@ final class AudioSection: PanelSection {
 
     func showApps(_ apps: [AudioApp], keepDragged: Bool, percent: (String) -> Double) {
         let wanted = Set(apps.map(\.bundleID))
+        for row in rows where !row.slider.isDragging { row.showPercent(percent(row.bundleID)) }
         guard apps.map(\.bundleID) != rows.map(\.bundleID) else { return }
         var next = apps.map { app in
             rows.first { $0.bundleID == app.bundleID } ?? makeRow(app, percent: percent(app.bundleID))
@@ -280,7 +285,8 @@ final class AudioSection: PanelSection {
     private func layoutRows() {
         let left = DS.margin
         let sliderX = left + Self.nameWidth + DS.gap
-        let sliderWidth = left + inner - sliderX
+        let percentX = left + inner - Self.percentWidth
+        let sliderWidth = percentX - DS.gapTight - sliderX
         let nameX = left + Self.iconSize + DS.gap
         var y = contentTop
         outputName.frame = NSRect(x: left, y: y, width: Self.nameWidth, height: DS.rowHeight)
@@ -295,6 +301,7 @@ final class AudioSection: PanelSection {
             row.icon.frame = NSRect(x: left, y: y + (DS.rowHeight - Self.iconSize) / 2, width: Self.iconSize, height: Self.iconSize)
             row.label.frame = NSRect(x: nameX, y: y, width: sliderX - DS.gap - nameX, height: DS.rowHeight)
             row.slider.frame = NSRect(x: sliderX, y: y, width: sliderWidth, height: DS.rowHeight)
+            row.value.frame = NSRect(x: percentX, y: y, width: Self.percentWidth, height: DS.rowHeight)
             y += DS.rowHeight + DS.gap
         }
         let toggleX = left + inner - DSToggle.size.width
@@ -312,7 +319,7 @@ final class AudioSection: PanelSection {
 }
 
 final class HubPanelView: NSView {
-    static let width: CGFloat = 300
+    static let width: CGFloat = 360
     let brightness = BrightnessSection()
     let awake = TimerSection(icon: .coffee, title: "Stay awake")
     let audio = AudioSection()
