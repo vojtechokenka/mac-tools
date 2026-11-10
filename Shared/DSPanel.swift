@@ -160,6 +160,10 @@ final class DSPanel: NSPanel {
         didSet { shadowWindow.level = level }
     }
 
+    override var collectionBehavior: NSWindow.CollectionBehavior {
+        didSet { shadowWindow.collectionBehavior = collectionBehavior }
+    }
+
     static func frame(size: NSSize, below anchor: NSRect, in visible: NSRect, gap: CGFloat = 4, margin: CGFloat = 8, alignment: Alignment = .center) -> NSRect {
         var x: CGFloat
         switch alignment {

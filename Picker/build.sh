@@ -3,8 +3,8 @@ set -e
 cd "$(dirname "$0")"
 APP="build/Picker.app"
 rm -rf "$APP"
-mkdir -p "$APP/Contents/MacOS"
-SOURCES=(main.swift)
+mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
+SOURCES=(main.swift ../Shared/*.swift)
 FRAMEWORKS=(-framework AppKit -framework Carbon)
 if [[ "$UNIVERSAL" == "1" ]]; then
   swiftc -O -target arm64-apple-macos14.0 -o "$APP/Contents/MacOS/Picker-arm64" "${SOURCES[@]}" "${FRAMEWORKS[@]}"
@@ -25,9 +25,13 @@ cat > "$APP/Contents/Info.plist" <<'EOF'
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleShortVersionString</key><string>1.0</string>
   <key>LSMinimumSystemVersion</key><string>14.0</string>
+  <key>CFBundleIconFile</key><string>AppIcon</string>
   <key>LSUIElement</key><true/>
 </dict>
 </plist>
 EOF
+cp ../Shared/Fonts/GoogleSansFlex.ttf "$APP/Contents/Resources/GoogleSansFlex.ttf"
+cp ../Shared/Fonts/OFL.txt "$APP/Contents/Resources/GoogleSansFlex-OFL.txt"
+[[ -f AppIcon.icns ]] && cp AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
 codesign --force --sign - "$APP"
 echo "Built $APP"

@@ -86,269 +86,191 @@ struct PickedColor: Equatable {
 final class SwatchView: NSView {
     var color: NSColor = .clear { didSet { needsDisplay = true } }
 
+    override var isFlipped: Bool { true }
+    override var mouseDownCanMoveWindow: Bool { true }
+
     override func draw(_ dirtyRect: NSRect) {
-        color.setFill()
-        bounds.fill()
+        DSDraw.fill(bounds, color)
+        DSDraw.fill(NSRect(x: bounds.maxX - 1, y: 0, width: 1, height: bounds.height), DS.alpha(DS.ink, 0.12))
     }
 }
 
-final class PillView: NSView {
-    var text = "" { didSet { needsDisplay = true } }
-    var onClick: (() -> Void)?
-    private var hovered = false { didSet { needsDisplay = true } }
-    private var copied = false { didSet { needsDisplay = true } }
-    private var copiedTimer: Timer?
-    private var trackingArea: NSTrackingArea?
+final class FormatLabel: DSControl {
+    static let width: CGFloat = 30
 
-    var preferredWidth: CGFloat {
-        ceil(attributed(text).size().width) + 22
-    }
-
-    private func attributed(_ string: String) -> NSAttributedString {
-        NSAttributedString(string: string, attributes: [
-            .font: NSFont.monospacedDigitSystemFont(ofSize: 13, weight: .medium),
-            .foregroundColor: NSColor.white,
-        ])
-    }
-
-    override func draw(_ dirtyRect: NSRect) {
-        let path = NSBezierPath(roundedRect: bounds, xRadius: 9, yRadius: 9)
-        if copied {
-            NSColor.systemGreen.withAlphaComponent(0.9).setFill()
-        } else if hovered {
-            NSColor.white.withAlphaComponent(0.22).setFill()
-        } else {
-            NSColor.black.withAlphaComponent(0.42).setFill()
-        }
-        path.fill()
-        let label = attributed(copied ? "✓" : text)
-        let size = label.size()
-        label.draw(at: NSPoint(x: (bounds.width - size.width) / 2, y: (bounds.height - size.height) / 2))
-    }
-
-    func flashCopied() {
-        copied = true
-        copiedTimer?.invalidate()
-        copiedTimer = Timer.scheduledTimer(withTimeInterval: 0.9, repeats: false) { [weak self] _ in self?.copied = false }
-    }
-
-    override func updateTrackingAreas() {
-        super.updateTrackingAreas()
-        if let trackingArea { removeTrackingArea(trackingArea) }
-        let area = NSTrackingArea(rect: .zero, options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect], owner: self, userInfo: nil)
-        addTrackingArea(area)
-        trackingArea = area
-    }
-
-    override func mouseEntered(with event: NSEvent) { hovered = true }
-    override func mouseExited(with event: NSEvent) { hovered = false }
-    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
-    override func mouseDown(with event: NSEvent) {
-        onClick?()
-        flashCopied()
-    }
-}
-
-final class LabelButton: NSView {
     let title: String
     var onClick: (() -> Void)?
-    private var hovered = false { didSet { needsDisplay = true } }
-    private var trackingArea: NSTrackingArea?
 
     init(title: String) {
         self.title = title
-        super.init(frame: .zero)
+        super.init()
         toolTip = "Copy full value"
+        setAccessibilityLabel("Copy \(title)")
     }
 
     required init?(coder: NSCoder) { nil }
 
+    override var isFocusable: Bool { false }
+
+    override var intrinsicContentSize: NSSize { NSSize(width: Self.width, height: DSChip.height) }
+
+    override func activate() { onClick?() }
+
     override func draw(_ dirtyRect: NSRect) {
-        let label = NSAttributedString(string: title, attributes: [
-            .font: NSFont.systemFont(ofSize: 13, weight: .regular),
-            .foregroundColor: hovered ? NSColor.white : NSColor.white.withAlphaComponent(0.85),
-            .underlineStyle: hovered ? NSUnderlineStyle.single.rawValue : 0,
-        ])
-        let size = label.size()
-        label.draw(at: NSPoint(x: 0, y: (bounds.height - size.height) / 2))
+        DSText.draw(title, in: bounds, font: DS.smallFont, color: isHovered ? DS.text : DS.muted, alignment: .left)
     }
 
-    override func updateTrackingAreas() {
-        super.updateTrackingAreas()
-        if let trackingArea { removeTrackingArea(trackingArea) }
-        let area = NSTrackingArea(rect: .zero, options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect], owner: self, userInfo: nil)
-        addTrackingArea(area)
-        trackingArea = area
-    }
-
-    override func mouseEntered(with event: NSEvent) { hovered = true }
-    override func mouseExited(with event: NSEvent) { hovered = false }
-    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
-    override func mouseDown(with event: NSEvent) { onClick?() }
+    override func accessibilityRole() -> NSAccessibility.Role? { .button }
 }
 
-final class HUDView: NSVisualEffectView {
-    var onCancel: (() -> Void)?
-    var onHover: ((Bool) -> Void)?
-    private var trackingArea: NSTrackingArea?
+final class HUDContentView: NSView {
+    static let size = NSSize(width: 360, height: 132)
+    static let swatchWidth: CGFloat = 132
+    static let gap: CGFloat = 20
+    static let rowGap: CGFloat = 8
+    static let chipGap: CGFloat = 6
+    static let closeInset: CGFloat = 8
 
-    override var acceptsFirstResponder: Bool { true }
-
-    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
-
-    override func keyDown(with event: NSEvent) {
-        if event.keyCode == UInt16(kVK_Escape) { onCancel?() } else { super.keyDown(with: event) }
-    }
-
-    override func cancelOperation(_ sender: Any?) { onCancel?() }
-
-    override func updateTrackingAreas() {
-        super.updateTrackingAreas()
-        if let trackingArea { removeTrackingArea(trackingArea) }
-        let area = NSTrackingArea(rect: .zero, options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect], owner: self, userInfo: nil)
-        addTrackingArea(area)
-        trackingArea = area
-    }
-
-    override func mouseEntered(with event: NSEvent) { onHover?(true) }
-    override func mouseExited(with event: NSEvent) { onHover?(false) }
-}
-
-final class HUDPanel: NSPanel {
     var onCopyText: ((String) -> Void)?
-    var onShow: (() -> Void)?
-    var onHide: (() -> Void)?
+    var onClose: (() -> Void)?
     private(set) var color: PickedColor?
-    private let hudView = HUDView()
     private let swatch = SwatchView()
-    private let closeButton = NSButton(title: "", target: nil, action: nil)
-    private var labels: [CopyFormat: LabelButton] = [:]
-    private var pills: [CopyFormat: [PillView]] = [:]
-    private let size = NSSize(width: 360, height: 132)
-    private let swatchWidth: CGFloat = 132
-    private let padding: CGFloat = 14
-    private let labelWidth: CGFloat = 38
-    private let pillHeight: CGFloat = 28
-    private let pillGap: CGFloat = 8
+    private let closeButton = DSIconButton(.close, label: "Close")
+    private var labels: [CopyFormat: FormatLabel] = [:]
+    private var chips: [CopyFormat: [DSChip]] = [:]
+
+    override var isFlipped: Bool { true }
+    override var mouseDownCanMoveWindow: Bool { true }
 
     init() {
-        super.init(contentRect: NSRect(origin: .zero, size: size), styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
-        level = .floating
-        isFloatingPanel = true
-        hasShadow = true
-        isOpaque = false
-        backgroundColor = .clear
-        hidesOnDeactivate = false
-        isReleasedWhenClosed = false
-        collectionBehavior = [.canJoinAllSpaces, .transient, .fullScreenAuxiliary]
-        appearance = NSAppearance(named: .vibrantDark)
+        super.init(frame: NSRect(origin: .zero, size: Self.size))
+        swatch.frame = NSRect(x: 0, y: 0, width: Self.swatchWidth, height: Self.size.height)
+        addSubview(swatch)
 
-        let container = NSView(frame: NSRect(origin: .zero, size: size))
-        container.wantsLayer = true
-        container.layer?.cornerRadius = 12
-        container.layer?.cornerCurve = .continuous
-        container.layer?.masksToBounds = true
-        hudView.material = .hudWindow
-        hudView.blendingMode = .behindWindow
-        hudView.state = .active
-        hudView.frame = NSRect(origin: .zero, size: size)
-        hudView.onCancel = { [weak self] in self?.hide() }
-        container.addSubview(hudView)
-        contentView = container
-        isMovableByWindowBackground = true
-
-        swatch.frame = NSRect(x: 0, y: 0, width: swatchWidth, height: size.height)
-        hudView.addSubview(swatch)
-
-        closeButton.image = NSImage(systemSymbolName: "xmark", accessibilityDescription: "Close")
-        closeButton.symbolConfiguration = NSImage.SymbolConfiguration(pointSize: 11, weight: .bold)
-        closeButton.isBordered = false
-        closeButton.contentTintColor = .white
-        closeButton.frame = NSRect(x: size.width - 12 - 18, y: size.height - 12 - 18, width: 18, height: 18)
-        closeButton.target = self
-        closeButton.action = #selector(closeClicked)
-        hudView.addSubview(closeButton)
+        closeButton.frame = NSRect(x: Self.size.width - Self.closeInset - DS.iconButtonSize, y: Self.closeInset, width: DS.iconButtonSize, height: DS.iconButtonSize)
+        closeButton.onClick = { [weak self] in self?.onClose?() }
+        addSubview(closeButton)
 
         for format in CopyFormat.allCases {
-            let label = LabelButton(title: format.title)
+            let label = FormatLabel(title: format.title)
             label.onClick = { [weak self] in
                 guard let self, let color = self.color else { return }
                 self.onCopyText?(color.value(format))
-                self.pills[format]?.forEach { $0.flashCopied() }
+                self.markCopied(format)
             }
-            hudView.addSubview(label)
+            addSubview(label)
             labels[format] = label
-            let count = format == .hex ? 1 : 3
-            var row: [PillView] = []
-            for _ in 0..<count {
-                let pill = PillView()
-                hudView.addSubview(pill)
-                row.append(pill)
+            var row: [DSChip] = []
+            for _ in 0..<(format == .hex ? 1 : 3) {
+                let chip = DSChip("")
+                chip.onClick = { [weak self, weak chip] in
+                    guard let self, let chip else { return }
+                    self.onCopyText?(chip.title)
+                    self.markCopied(format, only: chip)
+                }
+                addSubview(chip)
+                row.append(chip)
             }
-            pills[format] = row
+            chips[format] = row
         }
     }
 
-    override var canBecomeKey: Bool { false }
+    required init?(coder: NSCoder) { nil }
 
-    func show(_ picked: PickedColor, copied: CopyFormat) {
+    func configure(_ picked: PickedColor, copied: CopyFormat? = nil, only index: Int? = nil) {
         color = picked
         swatch.color = picked.nsColor
         let hsl = picked.hsl
         let values: [CopyFormat: [String]] = [
             .hex: [picked.hex],
             .rgb: ["\(picked.r)", "\(picked.g)", "\(picked.b)"],
-            .hsl: ["\(hsl.h)", "\(hsl.s)", "\(hsl.l)"],
+            .hsl: ["\(hsl.h)", "\(hsl.s)%", "\(hsl.l)%"],
         ]
         for format in CopyFormat.allCases {
-            for (pill, value) in zip(pills[format] ?? [], values[format] ?? []) {
-                pill.text = value
-                pill.toolTip = "Copy \(value)"
-                pill.onClick = { [weak self] in self?.onCopyText?(value) }
+            for (chip, value) in zip(chips[format] ?? [], values[format] ?? []) {
+                chip.title = value
+                chip.toolTip = "Copy \(value)"
             }
         }
         layoutRows()
-        pills[copied]?.forEach { $0.flashCopied() }
-
-        let mouse = NSEvent.mouseLocation
-        let screen = NSScreen.screens.first { $0.frame.contains(mouse) } ?? NSScreen.main
-        var origin = NSPoint(x: mouse.x + 14, y: mouse.y - 14 - size.height)
-        if let bounds = screen?.visibleFrame {
-            origin.x = min(max(origin.x, bounds.minX), bounds.maxX - size.width)
-            origin.y = min(max(origin.y, bounds.minY), bounds.maxY - size.height)
+        if let copied {
+            let row = chips[copied] ?? []
+            markCopied(copied, only: index.flatMap { row.indices.contains($0) ? row[$0] : nil })
         }
-        if !isVisible { setFrameOrigin(origin) }
-        orderFront(nil)
-        invalidateShadow()
-        onShow?()
+    }
+
+    private func markCopied(_ format: CopyFormat, only chip: DSChip? = nil) {
+        for (key, row) in chips {
+            for item in row { item.isCopied = chip == nil ? key == format : item === chip }
+        }
     }
 
     private func layoutRows() {
-        let rowSpacing = (size.height - padding * 2 - pillHeight * 3) / 2
-        let left = swatchWidth + padding
-        for (index, format) in CopyFormat.allCases.enumerated() {
-            let y = size.height - padding - pillHeight - CGFloat(index) * (pillHeight + rowSpacing)
-            labels[format]?.frame = NSRect(x: left, y: y, width: labelWidth, height: pillHeight)
-            var x = left + labelWidth + 6
-            for pill in pills[format] ?? [] {
-                let width = max(44, pill.preferredWidth)
-                pill.frame = NSRect(x: x, y: y, width: width, height: pillHeight)
-                x += width + pillGap
+        let rows = CGFloat(CopyFormat.allCases.count)
+        let height = DSChip.height
+        let total = rows * height + (rows - 1) * Self.rowGap
+        let left = Self.swatchWidth + Self.gap
+        var y = ((Self.size.height - total) / 2).rounded()
+        for format in CopyFormat.allCases {
+            labels[format]?.frame = NSRect(x: left, y: y, width: FormatLabel.width, height: height)
+            var x = left + FormatLabel.width + Self.chipGap
+            for chip in chips[format] ?? [] {
+                chip.sizeToFit()
+                chip.frame = NSRect(x: x, y: y, width: chip.frame.width, height: height)
+                x += chip.frame.width + Self.chipGap
             }
+            y += height + Self.rowGap
         }
     }
 
-    @objc private func closeClicked() { hide() }
+    static func sample(copied: CopyFormat = .hex, only index: Int? = nil) -> HUDContentView {
+        let view = HUDContentView()
+        view.configure(PickedColor(r: 0xB5, g: 0x3A, b: 0x9A), copied: copied, only: index)
+        return view
+    }
+}
+
+final class HUDController {
+    var onCopyText: ((String) -> Void)?
+    var onHide: (() -> Void)?
+    private let content = HUDContentView()
+    private let panel: DSPanel
+
+    var color: PickedColor? { content.color }
+
+    init() {
+        panel = DSPanel(width: HUDContentView.size.width, content: content)
+        panel.takesKeyFocus = false
+        panel.closesOnOutsideClick = false
+        panel.closesOnEscape = false
+        panel.isMovable = true
+        panel.isMovableByWindowBackground = true
+        panel.collectionBehavior = [.canJoinAllSpaces, .transient, .fullScreenAuxiliary]
+        panel.setContentHeight(HUDContentView.size.height)
+        panel.onClose = { [weak self] in self?.onHide?() }
+        content.onClose = { [weak self] in self?.hide() }
+        content.onCopyText = { [weak self] text in self?.onCopyText?(text) }
+    }
+
+    func show(_ picked: PickedColor, copied: CopyFormat) {
+        content.configure(picked, copied: copied)
+        if panel.isShown {
+            panel.orderFrontRegardless()
+            return
+        }
+        let mouse = NSEvent.mouseLocation
+        let screen = NSScreen.screens.first { $0.frame.contains(mouse) } ?? NSScreen.main
+        panel.show(at: NSPoint(x: mouse.x + 14, y: mouse.y - 14), screen: screen)
+    }
 
     func hide() {
-        orderOut(nil)
-        onHide?()
+        panel.dismiss()
     }
 }
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem!
-    private let hud = HUDPanel()
+    private lazy var hud = HUDController()
     private var sampler: NSColorSampler?
     private var hotKey: EventHotKeyRef?
     private var escHotKey: EventHotKeyRef?
@@ -362,6 +284,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        DS.registerFonts()
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         if let button = statusItem.button {
             button.image = Self.menuBarIcon()
@@ -443,6 +366,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         formatItem.submenu = formatMenu
         menu.addItem(formatItem)
+        menu.addItem(.separator())
+        menu.addItem(DSBrand.menuItem())
         menu.addItem(.separator())
         menu.addItem(NSMenuItem(title: "Quit", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
         return menu
@@ -526,6 +451,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if status != noErr { log("failed to register the ⌃⌥C shortcut (\(status))") }
     }
 
+}
+
+if let flag = CommandLine.arguments.firstIndex(of: "--snapshot"), CommandLine.arguments.count > flag + 1 {
+    let directory = URL(fileURLWithPath: CommandLine.arguments[flag + 1], isDirectory: true)
+    _ = NSApplication.shared
+    DS.registerFonts()
+    for dark in [false, true] {
+        let file = directory.appendingPathComponent(dark ? "picker-dark.png" : "picker-light.png")
+        if !DSSnapshot.write(view: HUDContentView.sample(), to: file, dark: dark, panel: true) { exit(1) }
+    }
+    let rgb = directory.appendingPathComponent("picker-rgb-copied-light.png")
+    if !DSSnapshot.write(view: HUDContentView.sample(copied: .rgb, only: 1), to: rgb, dark: false, panel: true) { exit(1) }
+    exit(0)
 }
 
 let app = NSApplication.shared
