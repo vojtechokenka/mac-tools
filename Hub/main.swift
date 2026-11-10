@@ -6,25 +6,18 @@ func log(_ message: String) {
     FileHandle.standardError.write(Data(("[Hub] " + message + "\n").utf8))
 }
 
-final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate {
     private let defaults = UserDefaults.standard
     private let monitor = ProcessMonitor()
     private var bus: MixBus?
     private var statusItem: NSStatusItem!
-    private let menu = NSMenu()
+    private var panel: DSPanel!
+    private var panelView: HubPanelView!
     private let rightMenu = NSMenu()
-    private let nightItem = NSMenuItem()
-    private var nightRow: NightRow!
-    private let noteItem = NSMenuItem()
-    private var meterViews: [String: LevelSlider] = [:]
     private var meterTimer: Timer?
     private static let meterInterval = 0.05
     private var outputVolumeDBValue = 0.0
     private var volumeUnreadable = false
-    private let emptyItem = NSMenuItem()
-    private let audioHeaderItem = NSMenuItem()
-    private let sleepItem = NSMenuItem()
-    private var sleepRow: DurationRow!
     private let sleepMacItem = NSMenuItem(title: "Sleep Mac when timer ends", action: nil, keyEquivalent: "")
     private static let sleepMinutes: [Double] = [15, 30, 60, 90]
     private static let sleepFadeSeconds = 120.0
@@ -35,9 +28,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var sleepRampTimer: Timer?
     private var sleepGainValue: Float = 1
     private var statusText = ""
-    private var volumeLabels: [String: NSTextField] = [:]
-    private var menuIsOpen = false
-    private var trackingBundleID: String?
     private var outputDevice = unknownObject
     private var defaultDeviceAddress = propertyAddress(kAudioHardwarePropertyDefaultOutputDevice)
     private var defaultDeviceListener: AudioObjectPropertyListenerBlock?
@@ -53,29 +43,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var pendingRebuildDeviceGone = false
     private var signalSources: [DispatchSourceSignal] = []
     private var shutdownDone = false
-    private let rowWidth: CGFloat = 280
 
     private let dimmer = GammaDimmer()
     private let brightnessKeys = BrightnessKeys()
     private let figmaPivotKey = FigmaPivotKey()
-    private let dimItem = NSMenuItem()
-    private var dimRow: BrightnessRow!
     private var dimWatchdog: Timer?
     private let dimKey = "dimLevel"
     private let dimStep = 0.05
 
     private let awake = AwakeSession()
-    private let awakeItem = NSMenuItem()
-    private var awakeRow: DurationRow!
 
     private static let legacyBundleIDs = ["cz.vojtechokenka.mixer", "cz.vojtechokenka.dimmer", "cz.vojtechokenka.coffeein"]
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        DS.registerFonts()
         let legacyApps = terminateLegacyApps()
         migrateSettingsIfNeeded()
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         statusItem.button?.image = Self.menuBarIcon()
-        menu.delegate = self
         if let button = statusItem.button {
             button.target = self
             button.action = #selector(statusItemClicked)
@@ -92,9 +77,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         sleepMacItem.state = sleepMacAfterTimer ? .on : .off
         rightMenu.addItem(sleepMacItem)
         rightMenu.addItem(.separator())
-        rightMenu.addItem(NSMenuItem(title: "Quit", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
-        setupFixedItems()
-        rebuildMenu()
+        rightMenu.addItem(DSBrand.menuItem())
+        rightMenu.addItem(.separator())
+        rightMenu.addItem(NSMenuItem(title: "Quit Hub", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
+        setupPanel()
 
         let ws = NSWorkspace.shared.notificationCenter
         ws.addObserver(self, selector: #selector(macDidWake), name: NSWorkspace.didWakeNotification, object: nil)
@@ -214,9 +200,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     private func refreshOutputDevice() {
         outputDevice = systemObject.readValue(kAudioHardwarePropertyDefaultOutputDevice, initial: unknownObject, name: "kAudioHardwarePropertyDefaultOutputDevice") ?? unknownObject
+        panelView.audio.showOutput(name: outputDeviceName())
         installSampleRateListener(on: outputDevice)
         installOutputVolumeListener(on: outputDevice)
         recomputeCeiling()
+    }
+
+    private func outputDeviceName() -> String {
+        guard outputDevice.isValid, let name = outputDevice.readString(kAudioObjectPropertyName, name: "kAudioObjectPropertyName"), !name.isEmpty else { return "Output" }
+        return name
     }
 
     private func installDefaultDeviceListener() {
@@ -380,7 +372,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         } else {
             replaceBus(apps: playing, keepOldOnFailure: true)
         }
-        if menuIsOpen { updateOpenMenu() }
+        syncAppRows()
     }
 
     private func makeBus(for apps: [AudioApp]) -> MixBus {
@@ -455,10 +447,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         return Float(pct <= 100 ? unit * unit : unit)
     }
 
-    static func capText(_ db: Double) -> String {
-        db < 0 ? "\u{2212}\(Int(-db)) dB" : "0 dB"
-    }
-
     private static let iconSVG = "<svg width=\"24\" height=\"24\" viewBox=\"0 0 24 24\" fill=\"none\" xmlns=\"http://www.w3.org/2000/svg\"><rect width=\"24\" height=\"24\" fill=\"white\" fill-opacity=\"0.25\"/><path transform=\"translate(12 12) scale(0.72) translate(-12 -12) scale(0.025) translate(0 960)\" fill=\"white\" d=\"M160-160v-320h160v320H160Zm240 0v-640h160v640H400Zm240 0v-440h160v440H640Z\"/></svg>"
 
     private static func menuBarIcon() -> NSImage {
@@ -470,92 +458,61 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
 
-    private func setupFixedItems() {
-        let emptyContainer = NSView(frame: NSRect(x: 0, y: 0, width: rowWidth, height: 30))
-        let emptyLabel = NSTextField(labelWithString: "Nothing is playing")
-        emptyLabel.font = .menuFont(ofSize: 13)
-        emptyLabel.textColor = .disabledControlTextColor
-        emptyLabel.frame = NSRect(x: 16, y: 6, width: rowWidth - 32, height: 18)
-        emptyContainer.addSubview(emptyLabel)
-        emptyItem.view = emptyContainer
+    private func setupPanel() {
+        let view = HubPanelView()
+        panelView = view
+        view.brightness.slider.onChange = { [weak self] value in self?.setDimLevel((100 - value) / 100) }
 
-        audioHeaderItem.view = HeaderRow(width: rowWidth, icon: SectionIcon.speaker, title: "Audio")
-
-        nightRow = NightRow(width: rowWidth)
-        nightRow.toggle.target = self
-        nightRow.toggle.action = #selector(toggleNightMode)
-        nightRow.slider.onChange = { [weak self] value, _ in self?.capChanged(value) }
-        nightItem.view = nightRow
-
-        let noteContainer = NSView(frame: NSRect(x: 0, y: 0, width: rowWidth, height: 44))
-        let noteLabel = NSTextField(wrappingLabelWithString: "This device doesn't report its volume: the cap and meter are relative to full scale — keep the headphone volume steady")
-        noteLabel.font = .systemFont(ofSize: 11)
-        noteLabel.textColor = .secondaryLabelColor
-        noteLabel.isSelectable = false
-        noteLabel.maximumNumberOfLines = 3
-        noteLabel.frame = NSRect(x: 16, y: 2, width: rowWidth - 32, height: 40)
-        noteContainer.addSubview(noteLabel)
-        noteItem.view = noteContainer
-
-        sleepRow = DurationRow(width: rowWidth, icon: SectionIcon.clock, title: "Sleep timer", buttonTitle: "Start")
-        sleepRow.hours.value = defaults.object(forKey: "sleepHours") as? Int ?? 0
-        sleepRow.minutes.value = defaults.object(forKey: "sleepMinutes") as? Int ?? 30
-        sleepRow.onChange = { [weak self] in
+        view.awake.hours.value = defaults.object(forKey: "awakeHours") as? Int ?? 0
+        view.awake.minutes.value = defaults.object(forKey: "awakeMinutes") as? Int ?? 30
+        view.awake.onChange = { [weak self] in
             guard let self else { return }
-            self.defaults.set(self.sleepRow.hours.value, forKey: "sleepHours")
-            self.defaults.set(self.sleepRow.minutes.value, forKey: "sleepMinutes")
-            self.sleepRow.button.isEnabled = self.sleepRow.totalMinutes > 0
-        }
-        sleepRow.onButton = { [weak self] in self?.sleepButtonClicked() }
-        sleepItem.view = sleepRow
-
-        dimRow = BrightnessRow(width: rowWidth)
-        dimRow.slider.onChange = { [weak self] value, _ in self?.setDimLevel((100 - value) / 100) }
-        dimItem.view = dimRow
-
-        awakeRow = DurationRow(width: rowWidth, icon: SectionIcon.mug, title: "Stay awake", buttonTitle: "Stay awake")
-        awakeRow.hours.value = defaults.object(forKey: "awakeHours") as? Int ?? 0
-        awakeRow.minutes.value = defaults.object(forKey: "awakeMinutes") as? Int ?? 30
-        awakeRow.onChange = { [weak self] in
-            guard let self else { return }
-            self.defaults.set(self.awakeRow.hours.value, forKey: "awakeHours")
-            self.defaults.set(self.awakeRow.minutes.value, forKey: "awakeMinutes")
+            self.defaults.set(self.panelView.awake.hours.value, forKey: "awakeHours")
+            self.defaults.set(self.panelView.awake.minutes.value, forKey: "awakeMinutes")
             self.syncAwakeControls()
         }
-        awakeRow.onButton = { [weak self] in self?.awakeButtonClicked() }
-        awakeItem.view = awakeRow
+        view.awake.onButton = { [weak self] in self?.awakeButtonClicked() }
 
+        view.audio.night.onChange = { [weak self] night in self?.setNightMode(night) }
+        view.audio.output.onChange = { [weak self] value in self?.capChanged(value) }
+        view.audio.onVolume = { [weak self] bundleID, pct in self?.volumeChanged(bundleID, pct: pct) }
+        view.audio.onVolumeCommit = { [weak self] in self?.syncAppRows() }
+
+        view.sleep.hours.value = defaults.object(forKey: "sleepHours") as? Int ?? 0
+        view.sleep.minutes.value = defaults.object(forKey: "sleepMinutes") as? Int ?? 30
+        view.sleep.onChange = { [weak self] in
+            guard let self else { return }
+            self.defaults.set(self.panelView.sleep.hours.value, forKey: "sleepHours")
+            self.defaults.set(self.panelView.sleep.minutes.value, forKey: "sleepMinutes")
+            self.syncSleepControls()
+        }
+        view.sleep.onButton = { [weak self] in self?.sleepButtonClicked() }
+
+        syncPanel()
+        panel = DSPanel(width: HubPanelView.width, content: view)
+        panel.onShow = { [weak self] in self?.panelDidShow() }
+        panel.onClose = { [weak self] in self?.panelDidClose() }
+        view.onResize = { [weak self] in
+            guard let self, self.panel.isShown else { return }
+            self.panel.sizeToContent()
+        }
+    }
+
+    private func syncPanel() {
+        syncAppRows()
         syncNightControls()
         syncSleepControls()
+        syncAwakeControls()
     }
 
     private func syncSleepControls() {
-        let active = sleepDeadline != nil || sleepMuted
-        var title = "Sleep timer"
-        var value = ""
-        if let deadline = sleepDeadline {
-            let remaining = max(0, Int(deadline.timeIntervalSinceNow.rounded(.up)))
-            title = "Sleep in"
-            value = String(format: "%d:%02d", remaining / 60, remaining % 60)
-        } else if sleepMuted {
-            title = "Muted"
-        }
-        let wasActive = sleepRow.hours.isHidden
-        sleepRow.setActive(active, title: title, value: value, buttonTitle: active ? "Cancel" : "Start", buttonEnabled: active || sleepRow.totalMinutes > 0)
-        if wasActive != active { relayoutMenuRows() }
+        let remaining = sleepDeadline.map { max(0, Int($0.timeIntervalSinceNow.rounded(.up))) }
+        panelView.showSleep(remaining: remaining, muted: sleepMuted)
         syncStatusText()
     }
 
-    private func relayoutMenuRows() {
-        for item in menu.items { if let view = item.view { view.needsLayout = true } }
-        menu.update()
-    }
-
     private func syncAwakeControls() {
-        let wasActive = awakeRow.hours.isHidden
-        let unlimited = awakeRow.totalMinutes == 0
-        awakeRow.setActive(awake.active, title: awake.active ? "Awake for" : "Stay awake", value: awake.countdownText, buttonTitle: awake.active ? "Cancel" : (unlimited ? "Stay awake ∞" : "Stay awake"))
-        if wasActive != awake.active { relayoutMenuRows() }
+        panelView.showAwake(active: awake.active, remaining: awake.remainingSeconds())
         syncStatusText()
     }
 
@@ -710,8 +667,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private func sleepButtonClicked() {
         if sleepDeadline != nil || sleepMuted {
             cancelSleepTimer(reason: "Cancel")
-        } else if sleepRow.totalMinutes > 0 {
-            startSleepTimer(minutes: Double(sleepRow.totalMinutes))
+        } else if panelView.sleep.totalMinutes > 0 {
+            startSleepTimer(minutes: Double(panelView.sleep.totalMinutes))
         }
     }
 
@@ -723,34 +680,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     private func syncNightControls() {
-        let night = nightMode
-        let capDB = nightCapDB
-        nightRow.toggle.state = night ? .on : .off
-        nightRow.slider.value = capDB
-        nightRow.slider.isEnabled = night
+        panelView.audio.showNight(nightMode, capDB: nightCapDB)
         syncVolumeNote()
     }
 
     private func syncVolumeNote() {
-        let wanted = nightMode && volumeUnreadable
-        let noteIndex = menu.index(of: noteItem)
-        if wanted, noteIndex < 0 {
-            let nightIndex = menu.index(of: nightItem)
-            guard nightIndex >= 0 else { return }
-            menu.insertItem(noteItem, at: nightIndex + 1)
-        } else if !wanted, noteIndex >= 0 {
-            menu.removeItem(noteItem)
-        }
+        panelView.audio.showNote(nightMode && volumeUnreadable)
     }
 
-    func menuNeedsUpdate(_ menu: NSMenu) {
-        rebuildMenu()
-    }
-
-    func menuWillOpen(_ menu: NSMenu) {
-        menuIsOpen = true
-        syncAwakeControls()
-        nightRow.slider.resetLevel()
+    private func panelDidShow() {
+        panelView.audio.resetLevels()
         meterTick()
         meterTimer?.invalidate()
         let timer = Timer(timeInterval: Self.meterInterval, repeats: true) { [weak self] _ in self?.meterTick() }
@@ -758,9 +697,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         meterTimer = timer
     }
 
-    func menuDidClose(_ menu: NSMenu) {
-        menuIsOpen = false
-        trackingBundleID = nil
+    private func panelDidClose() {
         meterTimer?.invalidate()
         meterTimer = nil
     }
@@ -772,114 +709,42 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     private func meterTick() {
         let state = bus?.state
-        let capDB: Double? = nightMode ? nightCapDB : nil
-        for (bundleID, meter) in meterViews {
+        for row in panelView.audio.rows {
             var meanSquare: Float = 0
-            if let bus, let state, let index = bus.slotIndices[bundleID], index < state.slots.count {
+            if let bus, let state, let index = bus.slotIndices[row.bundleID], index < state.slots.count {
                 meanSquare = state.slots[index].meanSquare.load(ordering: .relaxed)
             }
-            meter.showLevel(meterDB(meanSquare), capDB: capDB, interval: Self.meterInterval)
+            let gain = Self.gain(forPercent: volume(for: row.bundleID))
+            row.showLevel(meterDB(row.sourceMeanSquare(meanSquare, gain: gain, interval: Self.meterInterval)), interval: Self.meterInterval)
         }
-        nightRow.slider.showLevel(meterDB(state?.outputMeanSquare.load(ordering: .relaxed) ?? 0), capDB: capDB, interval: Self.meterInterval)
-        let shown = nightRow.slider.shownDB
-        nightRow.outputLabel.stringValue = shown.isFinite ? Self.capText(shown.rounded()) : "\u{2014}"
+        panelView.audio.showOutputLevel(meterDB(state?.outputMeanSquare.load(ordering: .relaxed) ?? 0), interval: Self.meterInterval)
     }
 
-    private var audioStart: Int {
-        max(0, menu.index(of: audioHeaderItem) + 1)
+    private func syncAppRows() {
+        panelView.audio.showApps(monitor.apps.filter(\.isPlaying), keepDragged: NSEvent.pressedMouseButtons != 0) { volume(for: $0) }
     }
 
-    private func updateOpenMenu() {
-        let playing = monitor.apps.filter(\.isPlaying)
-        let playingIDs = Set(playing.map(\.bundleID))
-        let protected = NSEvent.pressedMouseButtons != 0 ? trackingBundleID : nil
-        let start = audioStart
-        for item in menu.items.dropFirst(start) {
-            if item.isSeparatorItem { break }
-            guard let bundleID = item.representedObject as? String else { continue }
-            if !playingIDs.contains(bundleID), bundleID != protected {
-                menu.removeItem(item)
-                volumeLabels[bundleID] = nil
-                meterViews[bundleID] = nil
-            }
-        }
-        for app in playing where volumeLabels[app.bundleID] == nil {
-            if start < menu.items.count, menu.items[start] === emptyItem { menu.removeItem(emptyItem) }
-            var index = start
-            for item in menu.items.dropFirst(start) {
-                if item.isSeparatorItem { break }
-                guard item.representedObject is String, item.title.localizedCaseInsensitiveCompare(app.name) == .orderedAscending else { break }
-                index += 1
-            }
-            menu.insertItem(makeAppRow(app), at: index)
-        }
-        if volumeLabels.isEmpty, start < menu.items.count, menu.items[start] !== emptyItem { menu.insertItem(emptyItem, at: start) }
-    }
-
-    private func rebuildMenu() {
-        menu.removeAllItems()
-        volumeLabels.removeAll()
-        meterViews.removeAll()
-        menu.addItem(dimItem)
-        menu.addItem(.separator())
-        menu.addItem(audioHeaderItem)
-        let playing = monitor.apps.filter(\.isPlaying)
-        if playing.isEmpty {
-            menu.addItem(emptyItem)
-        } else {
-            for app in playing { menu.addItem(makeAppRow(app)) }
-        }
-        menu.addItem(.separator())
-        menu.addItem(nightItem)
-        menu.addItem(.separator())
-        menu.addItem(awakeItem)
-        menu.addItem(.separator())
-        menu.addItem(sleepItem)
-        syncNightControls()
-        syncSleepControls()
-        syncAwakeControls()
-    }
-
-    private func makeAppRow(_ app: AudioApp) -> NSMenuItem {
-        let bundleID = app.bundleID
-        let row = AppRow(width: rowWidth, name: app.name, icon: app.icon, percent: volume(for: bundleID))
-        volumeLabels[bundleID] = row.valueLabel
-        meterViews[bundleID] = row.slider
-        row.slider.onChange = { [weak self, weak row] value, modifiers in
-            guard let row else { return }
-            self?.volumeChanged(bundleID, value: value, modifiers: modifiers, slider: row.slider)
-        }
-
-        let item = NSMenuItem()
-        item.title = app.name
-        item.representedObject = bundleID
-        item.view = row
-        return item
-    }
-
-    private func volumeChanged(_ bundleID: String, value: Double, modifiers: NSEvent.ModifierFlags, slider: LevelSlider) {
-        trackingBundleID = bundleID
-        var pct = value
-        if !modifiers.contains(.command), pct > 100 {
-            pct = 100
-            slider.value = 100
-        }
+    private func volumeChanged(_ bundleID: String, pct: Double) {
         defaults.set(pct, forKey: "volume.\(bundleID)")
-        volumeLabels[bundleID]?.stringValue = "\(Int(pct.rounded())) %"
         if let bus, let index = bus.slotIndices[bundleID], let state = bus.state, index < state.slots.count {
             state.slots[index].gain.store(Self.gain(forPercent: pct), ordering: .relaxed)
         }
     }
 
     @objc private func statusItemClicked() {
-        let right = NSApp.currentEvent?.type == .rightMouseUp
-        statusItem.menu = right ? rightMenu : menu
-        statusItem.button?.performClick(nil)
-        DispatchQueue.main.async { [weak self] in self?.statusItem.menu = nil }
+        guard let button = statusItem.button else { return }
+        if NSApp.currentEvent?.type == .rightMouseUp {
+            panel.dismiss()
+            statusItem.menu = rightMenu
+            button.performClick(nil)
+            DispatchQueue.main.async { [weak self] in self?.statusItem.menu = nil }
+        } else {
+            if !panel.isShown { syncPanel() }
+            panel.toggle(under: button)
+        }
     }
 
-    @objc private func toggleNightMode() {
-        let night = nightRow.toggle.state == .on
+    private func setNightMode(_ night: Bool) {
         defaults.set(night, forKey: "nightMode")
         bus?.state?.nightEnabled.store(night, ordering: .relaxed)
         syncNightControls()
@@ -889,8 +754,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     private func capChanged(_ value: Double) {
         let capDB = min(max(value.rounded(), -60), 0)
-        nightRow.slider.value = capDB
         defaults.set(capDB, forKey: "nightCapDB")
+        syncNightControls()
         recomputeCeiling()
     }
 
@@ -907,8 +772,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private func setDimLevel(_ value: Double) {
         dimmer.level = value
         let pct = Int((dimmer.level * 100).rounded())
-        dimRow.slider.value = Double(100 - pct)
-        dimRow.valueLabel.stringValue = "\(100 - pct) %"
+        panelView.brightness.show(percent: 100 - pct)
         defaults.set(dimmer.level, forKey: dimKey)
     }
 
@@ -921,7 +785,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         if awake.active {
             awake.stop(reason: "Cancel")
         } else {
-            let minutes = Double(awakeRow.totalMinutes)
+            let minutes = Double(panelView.awake.totalMinutes)
             awake.start(minutes: minutes > 0 ? minutes : nil)
         }
         syncAwakeControls()
@@ -930,6 +794,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     @objc private func awakeMacDidWake() {
         awake.macDidWake()
     }
+}
+
+if let flag = CommandLine.arguments.firstIndex(of: "--snapshot") {
+    guard CommandLine.arguments.count > flag + 1 else {
+        FileHandle.standardError.write(Data("usage: Hub --snapshot <directory>\n".utf8))
+        exit(2)
+    }
+    let directory = URL(fileURLWithPath: CommandLine.arguments[flag + 1], isDirectory: true)
+    _ = NSApplication.shared
+    DS.registerFonts()
+    for sample in HubPanelView.Sample.allCases {
+        for dark in [false, true] {
+            let file = directory.appendingPathComponent("\(sample.rawValue)-\(dark ? "dark" : "light").png")
+            if !DSSnapshot.write(view: HubPanelView.sample(sample), to: file, dark: dark, panel: true) { exit(1) }
+        }
+    }
+    exit(0)
 }
 
 let app = NSApplication.shared

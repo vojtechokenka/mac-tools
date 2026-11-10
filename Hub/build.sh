@@ -3,8 +3,8 @@ set -e
 cd "$(dirname "$0")"
 APP="build/Hub.app"
 rm -rf "$APP"
-mkdir -p "$APP/Contents/MacOS"
-SOURCES=(main.swift Controls.swift Audio.swift NightChain.swift Display.swift Awake.swift FigmaKeys.swift)
+mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
+SOURCES=(main.swift Controls.swift Audio.swift NightChain.swift Display.swift Awake.swift FigmaKeys.swift ../Shared/*.swift)
 FRAMEWORKS=(-framework AppKit -framework AudioToolbox -framework CoreAudio -framework Carbon -framework IOKit)
 if [[ "$UNIVERSAL" == "1" ]]; then
   swiftc -O -target arm64-apple-macos15.0 -o "$APP/Contents/MacOS/Hub-arm64" "${SOURCES[@]}" "${FRAMEWORKS[@]}"
@@ -22,6 +22,7 @@ cat > "$APP/Contents/Info.plist" <<'EOF'
   <key>CFBundleName</key><string>Hub</string>
   <key>CFBundleIdentifier</key><string>cz.vojtechokenka.hub</string>
   <key>CFBundleExecutable</key><string>Hub</string>
+  <key>CFBundleIconFile</key><string>AppIcon</string>
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleShortVersionString</key><string>1.0</string>
   <key>LSMinimumSystemVersion</key><string>15.0</string>
@@ -30,5 +31,8 @@ cat > "$APP/Contents/Info.plist" <<'EOF'
 </dict>
 </plist>
 EOF
+cp ../Shared/Fonts/GoogleSansFlex.ttf "$APP/Contents/Resources/GoogleSansFlex.ttf"
+cp ../Shared/Fonts/OFL.txt "$APP/Contents/Resources/GoogleSansFlex-OFL.txt"
+[[ -f AppIcon.icns ]] && cp AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
 codesign --force --sign - "$APP"
 echo "Built $APP"
