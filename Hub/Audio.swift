@@ -93,6 +93,8 @@ final class ProcessMonitor {
     private var listListener: AudioObjectPropertyListenerBlock?
     private var processListeners: [AudioObjectID: AudioObjectPropertyListenerBlock] = [:]
     private var pendingRefresh: DispatchWorkItem?
+    private var pollTimer: Timer?
+    private var lastPlaying: [AudioObjectID: Bool] = [:]
 
     private typealias ResponsibilityFunction = @convention(c) (pid_t) -> pid_t
     private static let responsibilityFunction: ResponsibilityFunction? = {
@@ -106,9 +108,15 @@ final class ProcessMonitor {
         listListener = block
         check(AudioObjectAddPropertyListenerBlock(systemObject, &listAddress, .main, block), "AudioObjectAddPropertyListenerBlock(kAudioHardwarePropertyProcessObjectList)")
         refresh()
+        let timer = Timer(timeInterval: 0.5, repeats: true) { [weak self] _ in self?.poll() }
+        timer.tolerance = 0.2
+        RunLoop.main.add(timer, forMode: .common)
+        pollTimer = timer
     }
 
     func stop() {
+        pollTimer?.invalidate()
+        pollTimer = nil
         pendingRefresh?.cancel()
         pendingRefresh = nil
         if let block = listListener {
@@ -125,6 +133,21 @@ final class ProcessMonitor {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.2, execute: item)
     }
 
+    private func poll() {
+        guard pendingRefresh == nil else { return }
+        for (objectID, wasPlaying) in lastPlaying where isRunningOutput(objectID) != wasPlaying {
+            refresh()
+            return
+        }
+    }
+
+    private func isRunningOutput(_ objectID: AudioObjectID) -> Bool {
+        var address = propertyAddress(kAudioProcessPropertyIsRunningOutput)
+        var value: UInt32 = 0
+        var size = UInt32(MemoryLayout<UInt32>.size)
+        return AudioObjectGetPropertyData(objectID, &address, 0, nil, &size, &value) == noErr && value != 0
+    }
+
     private func refresh() {
         pendingRefresh = nil
         guard let objectIDs = systemObject.readArray(kAudioHardwarePropertyProcessObjectList, initial: unknownObject, name: "kAudioHardwarePropertyProcessObjectList") else { return }
@@ -132,12 +155,14 @@ final class ProcessMonitor {
 
         let runningByPID = Dictionary(NSWorkspace.shared.runningApplications.map { ($0.processIdentifier, $0) }, uniquingKeysWith: { _, latest in latest })
         var grouped: [String: (app: NSRunningApplication, objectIDs: [AudioObjectID], playing: Bool)] = [:]
+        var playingNow: [AudioObjectID: Bool] = [:]
 
         for objectID in objectIDs {
             guard let pid = objectID.readValue(kAudioProcessPropertyPID, initial: pid_t(0), name: "kAudioProcessPropertyPID"), pid != ownPID else { continue }
             let coreAudioBundleID = objectID.readString(kAudioProcessPropertyBundleID, name: "kAudioProcessPropertyBundleID")
             guard let app = responsibleApp(for: pid, in: runningByPID, coreAudioBundleID: coreAudioBundleID), let bundleID = app.bundleIdentifier else { continue }
             let playing = objectID.readBool(kAudioProcessPropertyIsRunningOutput, name: "kAudioProcessPropertyIsRunningOutput") ?? false
+            playingNow[objectID] = playing
             if var entry = grouped[bundleID] {
                 entry.objectIDs.append(objectID)
                 entry.playing = entry.playing || playing
@@ -150,6 +175,7 @@ final class ProcessMonitor {
         apps = grouped.map { bundleID, entry in
             AudioApp(bundleID: bundleID, name: entry.app.localizedName ?? bundleID, icon: entry.app.icon, processObjectIDs: entry.objectIDs.sorted(), isPlaying: entry.playing)
         }.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+        lastPlaying = playingNow
         onChange?(apps)
     }
 
