@@ -98,32 +98,75 @@ class FlippedView: NSView {
     override var isFlipped: Bool { true }
 }
 
-final class DropZoneView: FlippedView {
+final class InfoButton: DSControl {
+    var onHoverChange: ((Bool) -> Void)?
+    private var wasShowing = false
+
+    init(label: String) {
+        super.init()
+        setAccessibilityLabel(label)
+    }
+
+    required init?(coder: NSCoder) { nil }
+
+    override var intrinsicContentSize: NSSize { NSSize(width: DS.iconButtonSize, height: DS.iconButtonSize) }
+
+    private var isShowing: Bool { isHovered || showsFocus }
+
+    override func stateChanged() {
+        super.stateChanged()
+        notify()
+    }
+
+    override func becomeFirstResponder() -> Bool {
+        let accepted = super.becomeFirstResponder()
+        notify()
+        return accepted
+    }
+
+    override func resignFirstResponder() -> Bool {
+        let accepted = super.resignFirstResponder()
+        notify()
+        return accepted
+    }
+
+    private func notify() {
+        let showing = isShowing
+        guard showing != wasShowing else { return }
+        wasShowing = showing
+        needsDisplay = true
+        onHoverChange?(showing)
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        let side: CGFloat = 16
+        let rect = NSRect(x: (bounds.width - side) / 2, y: (bounds.height - side) / 2, width: side, height: side)
+        DSIcon.info.draw(in: rect, color: isShowing ? DS.blue : DS.icon)
+        if showsFocus { DSDraw.focusRing(bounds, radius: DS.radius) }
+    }
+
+    override func accessibilityRole() -> NSAccessibility.Role? { .button }
+}
+
+final class DropZoneView: DSControl {
     static let formatsText = "JPEG, PNG, HEIC, TIFF, GIF, WebP, AVIF, BMP and PDF"
     static let minHeight: CGFloat = 112
+    static let restTitle = "Drop images, PDFs or folders here"
 
-    var onFormatsToggled: (() -> Void)?
-    var showsFormats = false { didSet { updateContent() } }
+    var onClick: (() -> Void)?
     var dragTitle: String? { didSet { updateContent() } }
+    let info = InfoButton(label: "Supported formats")
 
-    private let title = DSLabel("Drop images, PDFs or folders here")
-    private let detail = DSLabel("Release to add them to the batch", color: DS.muted)
-    private let link = DSLinkButton("Supported formats")
-    private let formats = DSLabel(DropZoneView.formatsText, size: 11, color: DS.muted)
+    private let title = DSLabel(DropZoneView.restTitle)
+    private let detail = DSLabel("or click to browse", color: DS.muted)
 
-    override init(frame: NSRect) {
-        super.init(frame: frame)
+    override init() {
+        super.init()
+        setAccessibilityLabel("Add files")
+        info.setAccessibilityHelp(Self.formatsText)
         title.alignment = .center
         detail.alignment = .center
-        formats.alignment = .center
-        formats.maxLines = 0
-        formats.lineHeight = 16.5
-        link.onClick = { [weak self] in
-            guard let self else { return }
-            self.showsFormats.toggle()
-            self.onFormatsToggled?()
-        }
-        for view in [title, detail, link, formats] { addSubview(view) }
+        for view in [title, detail, info] { addSubview(view) }
         updateContent()
     }
 
@@ -131,26 +174,12 @@ final class DropZoneView: FlippedView {
 
     private var isOver: Bool { dragTitle != nil }
 
-    private var stack: [(NSView, CGFloat)] {
-        let inner = max(bounds.width - 48, 1)
-        if isOver { return [(title, 16), (detail, 16)] }
-        var views: [(NSView, CGFloat)] = [(title, 16), (link, DSLinkButton.height)]
-        if showsFormats { views.append((formats, formats.height(forWidth: inner))) }
-        return views
-    }
-
-    func height(forWidth width: CGFloat) -> CGFloat {
-        let views = stack
-        let content = views.reduce(0) { $0 + $1.1 } + CGFloat(max(views.count - 1, 0)) * 6
-        return max(Self.minHeight, ceil(content + 40))
-    }
+    func height(forWidth width: CGFloat) -> CGFloat { Self.minHeight }
 
     private func updateContent() {
-        title.text = dragTitle ?? "Drop images, PDFs or folders here"
-        link.title = showsFormats ? "Hide formats" : "Supported formats"
-        detail.isHidden = !isOver
-        link.isHidden = isOver
-        formats.isHidden = isOver || !showsFormats
+        title.text = dragTitle ?? Self.restTitle
+        detail.text = isOver ? "Release to add them to the batch" : "or click to browse"
+        info.isHidden = isOver
         layoutContent()
         needsDisplay = true
     }
@@ -162,25 +191,30 @@ final class DropZoneView: FlippedView {
 
     private func layoutContent() {
         let inner = max(bounds.width - 48, 1)
-        let views = stack
-        let content = views.reduce(0) { $0 + $1.1 } + CGFloat(max(views.count - 1, 0)) * 6
-        var y = ((bounds.height - content) / 2).rounded()
-        for (view, height) in views {
-            var width = inner
-            if view === link { width = min(ceil(link.intrinsicContentSize.width), inner) }
-            view.frame = NSRect(x: ((bounds.width - width) / 2).rounded(), y: y, width: width, height: height)
-            y += height + 6
-        }
+        let top = ((bounds.height - 38) / 2).rounded()
+        title.frame = NSRect(x: 24, y: top, width: inner, height: 16)
+        detail.frame = NSRect(x: 24, y: top + 22, width: inner, height: 16)
+        info.frame = NSRect(x: bounds.width - 8 - DS.iconButtonSize, y: 8, width: DS.iconButtonSize, height: DS.iconButtonSize)
+    }
+
+    override func activate() {
+        onClick?()
     }
 
     override func draw(_ dirtyRect: NSRect) {
         if isOver {
             DSDraw.fill(bounds, radius: DS.radius, DS.blueWash)
             DSDraw.border(bounds, radius: DS.radius, DS.blue)
+        } else if isHovered || isPressed {
+            DSDraw.fill(bounds, radius: DS.radius, DS.sunken)
+            DSDraw.dashedBorder(bounds, radius: DS.radius, DS.edge)
         } else {
             DSDraw.dashedBorder(bounds, radius: DS.radius, DS.line)
         }
+        if showsFocus { DSDraw.focusRing(bounds, radius: DS.radius) }
     }
+
+    override func accessibilityRole() -> NSAccessibility.Role? { .button }
 }
 
 final class DropOverlayView: FlippedView {
@@ -415,6 +449,7 @@ final class SqueezeWindowController: NSWindowController, NSTextFieldDelegate, NS
     private let clearButton = DSButton("Clear", style: .quiet)
     private var keyLoopSignature = ""
     private let dropZone = DropZoneView()
+    private let formatsBubble = DSBubble(DropZoneView.formatsText, title: "Supported formats")
     private let dropOverlay = DropOverlayView()
     private let topRule = DSSeparator()
     private let bottomRule = DSSeparator()
@@ -490,7 +525,9 @@ final class SqueezeWindowController: NSWindowController, NSTextFieldDelegate, NS
 
         addButton.onClick = { [weak self] in self?.openFiles() }
         clearButton.onClick = { [weak self] in self?.reset() }
-        dropZone.onFormatsToggled = { [weak self] in self?.relayout() }
+        dropZone.onClick = { [weak self] in self?.openFiles() }
+        dropZone.info.onHoverChange = { [weak self] on in self?.setFormatsBubble(on) }
+        formatsBubble.isHidden = true
 
         scrollView.drawsBackground = false
         scrollView.borderType = .noBorder
@@ -553,6 +590,7 @@ final class SqueezeWindowController: NSWindowController, NSTextFieldDelegate, NS
         for view in views { root.addSubview(view) }
         for chip in chips { root.addSubview(chip) }
         root.addSubview(dropOverlay)
+        root.addSubview(formatsBubble)
         window?.contentView = root
         window?.initialFirstResponder = root
     }
@@ -795,7 +833,18 @@ final class SqueezeWindowController: NSWindowController, NSTextFieldDelegate, NS
         window?.makeKeyAndOrderFront(nil)
     }
 
+    private func setFormatsBubble(_ show: Bool) {
+        guard show, items.isEmpty, !dropZone.isHidden, !dropZone.info.isHidden else {
+            formatsBubble.isHidden = true
+            return
+        }
+        let anchor = root.convert(dropZone.info.bounds, from: dropZone.info)
+        formatsBubble.setFrameOrigin(NSPoint(x: anchor.maxX - formatsBubble.frame.width, y: anchor.maxY + 4))
+        formatsBubble.isHidden = false
+    }
+
     private func setDragHighlight(_ urls: [URL]?) {
+        if urls != nil { formatsBubble.isHidden = true }
         if items.isEmpty {
             dropZone.dragTitle = urls.map(DragHelper.title(for:))
             dropOverlay.isHidden = true
@@ -866,11 +915,12 @@ final class SqueezeWindowController: NSWindowController, NSTextFieldDelegate, NS
 
         let addWidth = addButton.fittingWidth
         let clearWidth = clearButton.fittingWidth
-        let showsClear = !items.isEmpty && phase == .idle
-        place(addButton, NSRect(x: contentWidth - side - addWidth, y: y, width: addWidth, height: 28))
+        let showsHeader = !items.isEmpty
+        let showsClear = showsHeader && phase == .idle
+        place(addButton, NSRect(x: contentWidth - side - addWidth, y: y, width: addWidth, height: 28), visible: showsHeader)
         place(clearButton, NSRect(x: contentWidth - side - addWidth - 10 - clearWidth, y: y, width: clearWidth, height: 28), visible: showsClear)
-        place(summaryLabel, NSRect(x: side, y: y, width: inner - addWidth - 10 - (showsClear ? clearWidth + 10 : 0), height: 28))
-        y += 28 + blockGap
+        place(summaryLabel, NSRect(x: side, y: y, width: inner - addWidth - 10 - (showsClear ? clearWidth + 10 : 0), height: 28), visible: showsHeader)
+        if showsHeader { y += 28 + blockGap }
 
         let empty = items.isEmpty
         let listTop = y
@@ -887,6 +937,7 @@ final class SqueezeWindowController: NSWindowController, NSTextFieldDelegate, NS
             y += height + blockGap
         } else {
             dropZone.isHidden = true
+            formatsBubble.isHidden = true
             let rowPitch = FileRowView.height + 1
             let content = CGFloat(rows.count) * rowPitch - 1
             var limit = CGFloat(maxVisibleRows) * rowPitch - 1
@@ -1110,7 +1161,8 @@ final class SqueezeWindowController: NSWindowController, NSTextFieldDelegate, NS
     enum Sample: String, CaseIterable {
         case main = "squeeze"
         case empty = "squeeze-empty"
-        case formats = "squeeze-empty-formats"
+        case emptyHover = "squeeze-empty-hover"
+        case info = "squeeze-empty-info"
         case drop = "squeeze-empty-drop"
         case hover = "squeeze-hover"
         case running = "squeeze-running"
@@ -1142,10 +1194,15 @@ final class SqueezeWindowController: NSWindowController, NSTextFieldDelegate, NS
         case .main, .hover:
             items = batch
             forcedHoverRow = sample == .hover ? 1 : nil
-        case .empty, .formats, .drop:
+        case .empty, .emptyHover, .info, .drop:
             items = []
-            dropZone.showsFormats = sample == .formats
             dropZone.dragTitle = sample == .drop ? "3 files" : nil
+            dropZone.previewState = sample == .emptyHover || sample == .info ? .hovered : []
+            if sample == .info {
+                rebuildRows()
+                dropZone.info.previewState = .hovered
+                return
+            }
         case .running:
             items = progress
             items[0].report = report(items[0], 412_000)

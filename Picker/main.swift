@@ -138,6 +138,8 @@ final class HUDContentView: NSView {
     private let closeButton = DSIconButton(.close, label: "Close")
     private var labels: [CopyFormat: FormatLabel] = [:]
     private var chips: [CopyFormat: [DSChip]] = [:]
+    private var note: DSBubble?
+    private var noteTimer: Timer?
 
     override var isFlipped: Bool { true }
     override var mouseDownCanMoveWindow: Bool { true }
@@ -157,6 +159,7 @@ final class HUDContentView: NSView {
                 guard let self, let color = self.color else { return }
                 self.onCopyText?(color.value(format))
                 self.markCopied(format)
+                self.showNote(format)
             }
             addSubview(label)
             labels[format] = label
@@ -167,6 +170,7 @@ final class HUDContentView: NSView {
                     guard let self, let chip else { return }
                     self.onCopyText?(chip.title)
                     self.markCopied(format, only: chip)
+                    self.showNote(format, over: chip)
                 }
                 addSubview(chip)
                 row.append(chip)
@@ -177,7 +181,7 @@ final class HUDContentView: NSView {
 
     required init?(coder: NSCoder) { nil }
 
-    func configure(_ picked: PickedColor, copied: CopyFormat? = nil, only index: Int? = nil) {
+    func configure(_ picked: PickedColor, copied: CopyFormat? = nil, only index: Int? = nil, notify: Bool = false) {
         color = picked
         swatch.color = picked.nsColor
         let hsl = picked.hsl
@@ -195,8 +199,53 @@ final class HUDContentView: NSView {
         layoutRows()
         if let copied {
             let row = chips[copied] ?? []
-            markCopied(copied, only: index.flatMap { row.indices.contains($0) ? row[$0] : nil })
+            let chip = index.flatMap { row.indices.contains($0) ? row[$0] : nil }
+            markCopied(copied, only: chip)
+            if notify { showNote(copied, over: chip, animated: window != nil) }
         }
+    }
+
+    func showNote(_ format: CopyFormat, over chip: DSChip? = nil, animated: Bool = true) {
+        clearNote()
+        let row = chips[format] ?? []
+        guard let first = row.first, let last = row.last else { return }
+        let target = chip.map { $0.frame } ?? first.frame.union(last.frame)
+        let bubble = DSBubble("Copied")
+        let x = min(max((target.midX - bubble.frame.width / 2).rounded(), 0), bounds.width - bubble.frame.width)
+        bubble.setFrameOrigin(NSPoint(x: x, y: target.minY - 4 - bubble.frame.height))
+        addSubview(bubble, positioned: .above, relativeTo: nil)
+        note = bubble
+        let fades = animated && !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+        if fades {
+            bubble.alphaValue = 0
+            NSAnimationContext.runAnimationGroup { context in
+                context.duration = 0.1
+                bubble.animator().alphaValue = 1
+            }
+        }
+        noteTimer = Timer.scheduledTimer(withTimeInterval: 1.2, repeats: false) { [weak self, weak bubble] _ in
+            guard let self, let bubble, self.note === bubble else { return }
+            self.noteTimer = nil
+            if fades {
+                NSAnimationContext.runAnimationGroup({ context in
+                    context.duration = 0.2
+                    bubble.animator().alphaValue = 0
+                }, completionHandler: { [weak self, weak bubble] in
+                    guard let self, let bubble else { return }
+                    if self.note === bubble { self.note = nil }
+                    bubble.removeFromSuperview()
+                })
+            } else {
+                self.clearNote()
+            }
+        }
+    }
+
+    func clearNote() {
+        noteTimer?.invalidate()
+        noteTimer = nil
+        note?.removeFromSuperview()
+        note = nil
     }
 
     private func markCopied(_ format: CopyFormat, only chip: DSChip? = nil) {
@@ -223,9 +272,9 @@ final class HUDContentView: NSView {
         }
     }
 
-    static func sample(copied: CopyFormat = .hex, only index: Int? = nil) -> HUDContentView {
+    static func sample(copied: CopyFormat = .hex, only index: Int? = nil, note: Bool = false) -> HUDContentView {
         let view = HUDContentView()
-        view.configure(PickedColor(r: 0xB5, g: 0x3A, b: 0x9A), copied: copied, only: index)
+        view.configure(PickedColor(r: 0xB5, g: 0x3A, b: 0x9A), copied: copied, only: index, notify: note)
         return view
     }
 }
@@ -247,13 +296,16 @@ final class HUDController {
         panel.isMovableByWindowBackground = true
         panel.collectionBehavior = [.canJoinAllSpaces, .transient, .fullScreenAuxiliary]
         panel.setContentHeight(HUDContentView.size.height)
-        panel.onClose = { [weak self] in self?.onHide?() }
+        panel.onClose = { [weak self] in
+            self?.content.clearNote()
+            self?.onHide?()
+        }
         content.onClose = { [weak self] in self?.hide() }
         content.onCopyText = { [weak self] text in self?.onCopyText?(text) }
     }
 
     func show(_ picked: PickedColor, copied: CopyFormat) {
-        content.configure(picked, copied: copied)
+        content.configure(picked, copied: copied, notify: true)
         if panel.isShown {
             panel.orderFrontRegardless()
             return
@@ -463,6 +515,13 @@ if let flag = CommandLine.arguments.firstIndex(of: "--snapshot"), CommandLine.ar
     }
     let rgb = directory.appendingPathComponent("picker-rgb-copied-light.png")
     if !DSSnapshot.write(view: HUDContentView.sample(copied: .rgb, only: 1), to: rgb, dark: false, panel: true) { exit(1) }
+    for dark in [false, true] {
+        let theme = dark ? "dark" : "light"
+        let hex = directory.appendingPathComponent("picker-note-hex-\(theme).png")
+        if !DSSnapshot.write(view: HUDContentView.sample(note: true), to: hex, dark: dark, panel: true) { exit(1) }
+        let chip = directory.appendingPathComponent("picker-note-rgb-\(theme).png")
+        if !DSSnapshot.write(view: HUDContentView.sample(copied: .rgb, only: 1, note: true), to: chip, dark: dark, panel: true) { exit(1) }
+    }
     exit(0)
 }
 if CommandLine.arguments.contains("--snapshot") {
