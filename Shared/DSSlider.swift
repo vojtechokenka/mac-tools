@@ -149,6 +149,14 @@ final class DSSlider: DSControl {
         onCommit?(value)
     }
 
+    override func cancelInteraction() {
+        super.cancelInteraction()
+        guard isDragging else { return }
+        isDragging = false
+        stateChanged()
+        onCommit?(value)
+    }
+
     private func apply(_ event: NSEvent) {
         guard travel > 0 else { return }
         let x = convert(event.locationInWindow, from: nil).x

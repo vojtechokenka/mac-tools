@@ -1298,6 +1298,10 @@ if CommandLine.arguments.dropFirst().first == "--cli" {
 if let flag = CommandLine.arguments.firstIndex(of: "--snapshot"), CommandLine.arguments.count > flag + 1 {
     exit(Snapshots.run(directory: URL(fileURLWithPath: CommandLine.arguments[flag + 1], isDirectory: true)))
 }
+if CommandLine.arguments.contains("--snapshot") {
+    FileHandle.standardError.write(Data("usage: Squeeze --snapshot <directory>\n".utf8))
+    exit(2)
+}
 
 let app = NSApplication.shared
 let delegate = AppDelegate()

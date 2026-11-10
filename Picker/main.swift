@@ -465,6 +465,10 @@ if let flag = CommandLine.arguments.firstIndex(of: "--snapshot"), CommandLine.ar
     if !DSSnapshot.write(view: HUDContentView.sample(copied: .rgb, only: 1), to: rgb, dark: false, panel: true) { exit(1) }
     exit(0)
 }
+if CommandLine.arguments.contains("--snapshot") {
+    FileHandle.standardError.write(Data("usage: Picker --snapshot <directory>\n".utf8))
+    exit(2)
+}
 
 let app = NSApplication.shared
 let delegate = AppDelegate()
