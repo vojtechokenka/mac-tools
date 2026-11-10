@@ -325,7 +325,7 @@ final class HubPanelView: NSView {
     let audio = AudioSection()
     let sleep = TimerSection(icon: .timer, title: "Sleep timer")
     var onResize: (() -> Void)?
-    private var sections: [PanelSection] { [brightness, awake, audio, sleep] }
+    private var sections: [PanelSection] { [brightness, audio, awake, sleep] }
     private var separators: [DSSeparator] = []
 
     init() {

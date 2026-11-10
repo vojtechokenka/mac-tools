@@ -53,7 +53,7 @@ The apps are ad-hoc signed, not notarized. Prebuilt downloads therefore need the
 
 ## Hub
 
-- Left click opens the panel: Brightness slider, Stay awake (hours/minutes + button), Audio (the output device with its live level, one row per playing app with the live level drawn inside the volume slider; hold ⌘ to push a slider above 100 %), Night mode (toggle; the pink knob on the output slider sets the cap — nothing gets louder than that, quieter content is left alone), Sleep timer (fades the mix out over the last two minutes, pauses playback, optionally sleeps the Mac).
+- Left click opens the panel: Brightness slider, Audio (the output device with its live level, one row per playing app with the live level drawn inside the volume slider and the volume in percent next to it; hold ⌘ to push a slider above 100 %), Night mode (toggle; the pink knob on the output slider sets the cap — nothing gets louder than that, quieter content is left alone), Stay awake (hours/minutes + button), Sleep timer (fades the mix out over the last two minutes, pauses playback, optionally sleeps the Mac).
 - Right click: permissions, "Sleep Mac when timer ends", Quit.
 - Shortcuts: ⌘ + brightness up/down (with Accessibility), ⌃⌥⌘↑/↓ and ⌘F1/⌘F2.
 - Night mode internals are documented in `Hub/docs/night-mode-dsp.md` (in Czech).
