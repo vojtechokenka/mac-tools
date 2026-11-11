@@ -123,6 +123,7 @@ final class TaskRowView: FlippedView, NSTextFieldDelegate {
     var onCancelEdit: (() -> Void)?
     var onResize: (() -> Void)?
     var contextMenu: (() -> NSMenu?)?
+    var onPointerMove: (() -> Void)?
     var previewHover = false { didSet { updateChrome() } }
     private(set) var editing = false
     private var hasActions: Bool { !ref.item.done }
@@ -222,7 +223,7 @@ final class TaskRowView: FlippedView, NSTextFieldDelegate {
 
     override func updateTrackingAreas() {
         super.updateTrackingAreas()
-        if let trackingArea { removeTrackingArea(trackingArea) }
+        guard trackingArea == nil else { return }
         let area = NSTrackingArea(rect: .zero, options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect], owner: self, userInfo: nil)
         addTrackingArea(area)
         trackingArea = area
@@ -239,8 +240,16 @@ final class TaskRowView: FlippedView, NSTextFieldDelegate {
         syncHoverWithPointer()
     }
 
-    override func mouseEntered(with event: NSEvent) { hovered = true }
-    override func mouseExited(with event: NSEvent) { hovered = false }
+    override func mouseEntered(with event: NSEvent) { pointerMoved() }
+    override func mouseExited(with event: NSEvent) { pointerMoved() }
+
+    private func pointerMoved() {
+        if let onPointerMove {
+            onPointerMove()
+        } else {
+            syncHoverWithPointer()
+        }
+    }
 
     private func hitsText(_ point: NSPoint) -> Bool {
         guard textLabel.frame.contains(point) else { return false }
@@ -490,6 +499,9 @@ final class PanelController: NSObject, NSTextFieldDelegate, NSPopoverDelegate {
         scrollView.verticalScrollElasticity = .none
         scrollView.horizontalScrollElasticity = .none
         scrollView.documentView = listView
+        scrollView.contentView.postsBoundsChangedNotifications = true
+        NotificationCenter.default.addObserver(self, selector: #selector(pointerContextChanged), name: NSView.boundsDidChangeNotification, object: scrollView.contentView)
+        scrollView.addTrackingArea(NSTrackingArea(rect: .zero, options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect], owner: self, userInfo: nil))
 
         datePopover.behavior = .transient
         datePopover.animates = true
@@ -556,6 +568,23 @@ final class PanelController: NSObject, NSTextFieldDelegate, NSPopoverDelegate {
         row.onCancelEdit = { [weak self] in self?.reload() }
         row.onResize = { [weak self] in self?.layout() }
         row.contextMenu = { [weak self] in self?.contextMenu(for: ref) }
+        row.onPointerMove = { [weak self] in self?.syncHover() }
+    }
+
+    func syncHover() {
+        for row in rowViews { row.syncHoverWithPointer() }
+    }
+
+    @objc private func pointerContextChanged() {
+        syncHover()
+    }
+
+    @objc func mouseEntered(with event: NSEvent) {
+        syncHover()
+    }
+
+    @objc func mouseExited(with event: NSEvent) {
+        syncHover()
     }
 
     private func layoutList() -> CGFloat {
@@ -618,7 +647,7 @@ final class PanelController: NSObject, NSTextFieldDelegate, NSPopoverDelegate {
         scrollView.frame = NSRect(x: 0, y: y, width: width, height: visibleList)
         y += visibleList + TodoLayout.bottom
         view.setFrameSize(NSSize(width: width, height: y))
-        for row in rowViews { row.syncHoverWithPointer() }
+        syncHover()
         onResize?()
     }
 

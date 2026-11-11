@@ -239,6 +239,7 @@ final class FileRowView: FlippedView {
     var onRemove: (() -> Void)?
     var actionsEnabled = true { didSet { updateActions() } }
     var forcesHover = false { didSet { updateActions() } }
+    var onPointerMove: (() -> Void)?
 
     private let typeTag = DSTag("", icon: .image, minWidth: 52)
     private let name = DSLabel()
@@ -333,10 +334,11 @@ final class FileRowView: FlippedView {
 
     override func updateTrackingAreas() {
         super.updateTrackingAreas()
-        if let trackingArea { removeTrackingArea(trackingArea) }
-        let area = NSTrackingArea(rect: .zero, options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect], owner: self, userInfo: nil)
-        addTrackingArea(area)
-        trackingArea = area
+        if trackingArea == nil {
+            let area = NSTrackingArea(rect: .zero, options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect], owner: self, userInfo: nil)
+            addTrackingArea(area)
+            trackingArea = area
+        }
         syncHover()
     }
 
@@ -352,8 +354,16 @@ final class FileRowView: FlippedView {
         updateActions()
     }
 
-    override func mouseEntered(with event: NSEvent) { setHovered(true) }
-    override func mouseExited(with event: NSEvent) { setHovered(false) }
+    override func mouseEntered(with event: NSEvent) { pointerMoved() }
+    override func mouseExited(with event: NSEvent) { pointerMoved() }
+
+    private func pointerMoved() {
+        if let onPointerMove {
+            onPointerMove()
+        } else {
+            syncHover()
+        }
+    }
 }
 
 final class RootDropView: FlippedView {
@@ -535,6 +545,8 @@ final class SqueezeWindowController: NSWindowController, NSTextFieldDelegate, NS
         scrollView.autohidesScrollers = true
         scrollView.contentView.drawsBackground = false
         scrollView.documentView = listView
+        scrollView.contentView.postsBoundsChangedNotifications = true
+        NotificationCenter.default.addObserver(self, selector: #selector(syncRowHover), name: NSView.boundsDidChangeNotification, object: scrollView.contentView)
         dropOverlay.isHidden = true
 
         formatControl.onChange = { [weak self] _ in self?.formatChanged() }
@@ -855,6 +867,10 @@ final class SqueezeWindowController: NSWindowController, NSTextFieldDelegate, NS
         relayout()
     }
 
+    @objc private func syncRowHover() {
+        rows.forEach { $0.syncHover() }
+    }
+
     private func rebuildRows() {
         rows.forEach { $0.removeFromSuperview() }
         rowRules.forEach { $0.removeFromSuperview() }
@@ -862,6 +878,7 @@ final class SqueezeWindowController: NSWindowController, NSTextFieldDelegate, NS
             let row = FileRowView(frame: .zero)
             row.onReplace = { [weak self] in self?.replace(item.url) }
             row.onRemove = { [weak self] in self?.remove(item.url) }
+            row.onPointerMove = { [weak self] in self?.syncRowHover() }
             return row
         }
         rowRules = rows.count > 1 ? (1..<rows.count).map { _ in DSSeparator() } : []
