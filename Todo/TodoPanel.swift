@@ -124,6 +124,8 @@ final class TaskRowView: FlippedView, NSTextFieldDelegate {
     var onResize: (() -> Void)?
     var contextMenu: (() -> NSMenu?)?
     var onPointerMove: (() -> Void)?
+    var onClick: (() -> Void)?
+    private var pressed = false
     var previewHover = false { didSet { updateChrome() } }
     private(set) var editing = false
     private var hasActions: Bool { !ref.item.done }
@@ -251,25 +253,20 @@ final class TaskRowView: FlippedView, NSTextFieldDelegate {
         }
     }
 
-    private func hitsText(_ point: NSPoint) -> Bool {
-        guard textLabel.frame.contains(point) else { return false }
-        let lines = DSText.wrap(textLabel.text, font: textLabel.font, width: textLabel.bounds.width)
-        let widest = lines.map { DSText.width(of: $0) }.max() ?? 0
-        return point.x <= textLabel.frame.minX + widest + 6
-    }
-
     override func mouseDown(with event: NSEvent) {
         guard !editing else { return super.mouseDown(with: event) }
         let point = convert(event.locationInWindow, from: nil)
-        if event.clickCount == 2, hitsText(point) {
-            onEdit?()
-            return
-        }
         if event.clickCount == 1, !ref.item.done, let tag = dueTag, tag.frame.contains(point) {
             onDeadline?()
             return
         }
-        super.mouseDown(with: event)
+        pressed = event.clickCount == 1
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        guard pressed else { return super.mouseUp(with: event) }
+        pressed = false
+        if bounds.contains(convert(event.locationInWindow, from: nil)) { onClick?() }
     }
 
     override func menu(for event: NSEvent) -> NSMenu? {
@@ -558,6 +555,14 @@ final class PanelController: NSObject, NSTextFieldDelegate, NSPopoverDelegate {
     private func wire(_ row: TaskRowView) {
         let ref = row.ref
         row.onToggle = { [weak self] in self?.toggle(ref) }
+        row.onClick = { [weak self] in
+            guard let self else { return }
+            if self.editingRow() != nil {
+                self.endInlineEditing()
+            } else {
+                self.toggle(ref)
+            }
+        }
         row.onDelete = { [weak self] in self?.delete(ref) }
         row.onEdit = { [weak self] in self?.startEditing(ref) }
         row.onDeadline = { [weak self, weak row] in

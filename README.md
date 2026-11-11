@@ -73,7 +73,7 @@ The apps are ad-hoc signed, not notarized. Prebuilt downloads therefore need the
 - [x] Older thing ✓2026-09-26
 ```
 
-- Type `Project; task text` to group tasks; end with a date token (`tomorrow`, `fri`, `3.10.`, `@2026-10-03`) or pick one in the calendar. The sort icon next to the calendar switches the order (added, deadline, A–Z) and grouping by project. Double-click a task to edit its line; an `@2026-10-03` at the end sets the deadline, removing it clears it. Completed tasks move to the archive immediately or after 24 h (Settings…).
+- Type `Project; task text` to group tasks; end with a date token (`tomorrow`, `fri`, `3.10.`, `@2026-10-03`) or pick one in the calendar. The sort icon next to the calendar switches the order (added, deadline, A–Z) and grouping by project. Click a task to mark it done or open again. The pencil on a hovered row (or right-click, Edit) edits its line; an `@2026-10-03` at the end sets the deadline, removing it clears it. Completed tasks move to the archive immediately or after 24 h (Settings…).
 - Right click the icon for Settings… and Quit. ⌃⌥N opens the panel.
 
 ## Picker
