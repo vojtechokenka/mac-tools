@@ -3,7 +3,8 @@ import AppKit
 enum TodoLayout {
     static let width: CGFloat = 420
     static let maxHeight: CGFloat = 640
-    static var doubleClickWindow: TimeInterval { min(NSEvent.doubleClickInterval, 0.5) }
+    static var doubleClickWindow: TimeInterval { min(NSEvent.doubleClickInterval, 0.35) }
+    static let toggleDelay: TimeInterval = 1.5
     static let top: CGFloat = 12
     static let bottom: CGFloat = 8
     static let side: CGFloat = 16
@@ -129,6 +130,7 @@ final class TaskRowView: FlippedView, NSTextFieldDelegate {
     var onDoubleClick: (() -> Void)?
     var pendingToggle = false { didSet { if pendingToggle != oldValue { updateDoneLook() } } }
     private var pressed = false
+    private var pressTime: TimeInterval = 0
     var previewHover = false { didSet { updateChrome() } }
     private(set) var editing = false
     private var hasActions: Bool { !ref.item.done }
@@ -264,12 +266,13 @@ final class TaskRowView: FlippedView, NSTextFieldDelegate {
             onDeadline?()
             return
         }
-        if pendingToggle {
+        if pendingToggle, event.timestamp - pressTime <= TodoLayout.doubleClickWindow {
             pressed = false
             onDoubleClick?()
             return
         }
         pressed = true
+        pressTime = event.timestamp
     }
 
     private func updateDoneLook() {
@@ -580,8 +583,8 @@ final class PanelController: NSObject, NSTextFieldDelegate, NSPopoverDelegate {
     private func wire(_ row: TaskRowView) {
         let ref = row.ref
         row.onToggle = { [weak self] in
-            guard let self else { return }
-            if !self.settlePendingToggle(for: ref) { self.toggle(ref) }
+            self?.endInlineEditing()
+            self?.scheduleToggle(ref)
         }
         row.onClick = { [weak self] in self?.rowClicked(ref) }
         row.onDoubleClick = { [weak self] in self?.startEditing(ref) }
@@ -607,8 +610,12 @@ final class PanelController: NSObject, NSTextFieldDelegate, NSPopoverDelegate {
             endInlineEditing()
             return
         }
+        scheduleToggle(ref)
+    }
+
+    private func scheduleToggle(_ ref: TaskRef) {
         if settlePendingToggle(for: ref) { return }
-        let timer = Timer(timeInterval: TodoLayout.doubleClickWindow, repeats: false) { [weak self] _ in self?.flushPendingToggle() }
+        let timer = Timer(timeInterval: TodoLayout.toggleDelay, repeats: false) { [weak self] _ in self?.flushPendingToggle() }
         RunLoop.main.add(timer, forMode: .common)
         pendingToggle = (ref, timer)
         rowView(of: ref)?.pendingToggle = true
