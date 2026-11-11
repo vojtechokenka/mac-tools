@@ -345,7 +345,7 @@ final class FileRowView: FlippedView {
     func syncHover() {
         guard let window else { return }
         let point = convert(window.mouseLocationOutsideOfEventStream, from: nil)
-        setHovered(visibleRect.contains(point))
+        setHovered(bounds.intersection(visibleRect).contains(point))
     }
 
     private func setHovered(_ value: Bool) {

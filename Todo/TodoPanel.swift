@@ -232,7 +232,7 @@ final class TaskRowView: FlippedView, NSTextFieldDelegate {
     func syncHoverWithPointer() {
         guard let window else { return }
         let point = convert(window.mouseLocationOutsideOfEventStream, from: nil)
-        hovered = window.isVisible && visibleRect.contains(point)
+        hovered = window.isVisible && bounds.intersection(visibleRect).contains(point)
     }
 
     override func viewDidMoveToWindow() {
