@@ -178,6 +178,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        controller?.flushPendingToggle()
         controller?.endInlineEditing()
     }
 
@@ -310,6 +311,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func panelDidClose() {
         controller.closeDatePicker()
+        controller.flushPendingToggle()
         controller.endInlineEditing()
         updateCount()
     }

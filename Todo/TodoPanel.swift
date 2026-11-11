@@ -3,6 +3,7 @@ import AppKit
 enum TodoLayout {
     static let width: CGFloat = 420
     static let maxHeight: CGFloat = 640
+    static var doubleClickWindow: TimeInterval { min(NSEvent.doubleClickInterval, 0.5) }
     static let top: CGFloat = 12
     static let bottom: CGFloat = 8
     static let side: CGFloat = 16
@@ -125,6 +126,8 @@ final class TaskRowView: FlippedView, NSTextFieldDelegate {
     var contextMenu: (() -> NSMenu?)?
     var onPointerMove: (() -> Void)?
     var onClick: (() -> Void)?
+    var onDoubleClick: (() -> Void)?
+    var pendingToggle = false { didSet { if pendingToggle != oldValue { updateDoneLook() } } }
     private var pressed = false
     var previewHover = false { didSet { updateChrome() } }
     private(set) var editing = false
@@ -256,11 +259,24 @@ final class TaskRowView: FlippedView, NSTextFieldDelegate {
     override func mouseDown(with event: NSEvent) {
         guard !editing else { return super.mouseDown(with: event) }
         let point = convert(event.locationInWindow, from: nil)
-        if event.clickCount == 1, !ref.item.done, let tag = dueTag, tag.frame.contains(point) {
+        if !ref.item.done, let tag = dueTag, tag.frame.contains(point) {
+            pressed = false
             onDeadline?()
             return
         }
-        pressed = event.clickCount == 1
+        if pendingToggle {
+            pressed = false
+            onDoubleClick?()
+            return
+        }
+        pressed = true
+    }
+
+    private func updateDoneLook() {
+        let done = ref.item.done != pendingToggle
+        checkBox.isOn = done
+        textLabel.color = done ? DS.muted : DS.text
+        textLabel.isStruck = done
     }
 
     override func mouseUp(with event: NSEvent) {
@@ -454,6 +470,7 @@ final class PanelController: NSObject, NSTextFieldDelegate, NSPopoverDelegate {
     private let datePopover = NSPopover()
     private let datePicker = DatePickerController()
     private var rowViews: [TaskRowView] = []
+    private var pendingToggle: (ref: TaskRef, timer: Timer)?
     private var pendingDue: Day?
     private var lastTypedLength = 0
     private var suggesting = false
@@ -514,6 +531,14 @@ final class PanelController: NSObject, NSTextFieldDelegate, NSPopoverDelegate {
     func reload() {
         let pending = captureEdit()
         rebuildRows()
+        if let toggling = pendingToggle {
+            if let row = rowView(of: toggling.ref) {
+                row.pendingToggle = true
+            } else {
+                toggling.timer.invalidate()
+                pendingToggle = nil
+            }
+        }
         layout()
         restoreEdit(pending)
         onChange?()
@@ -554,15 +579,12 @@ final class PanelController: NSObject, NSTextFieldDelegate, NSPopoverDelegate {
 
     private func wire(_ row: TaskRowView) {
         let ref = row.ref
-        row.onToggle = { [weak self] in self?.toggle(ref) }
-        row.onClick = { [weak self] in
+        row.onToggle = { [weak self] in
             guard let self else { return }
-            if self.editingRow() != nil {
-                self.endInlineEditing()
-            } else {
-                self.toggle(ref)
-            }
+            if !self.settlePendingToggle(for: ref) { self.toggle(ref) }
         }
+        row.onClick = { [weak self] in self?.rowClicked(ref) }
+        row.onDoubleClick = { [weak self] in self?.startEditing(ref) }
         row.onDelete = { [weak self] in self?.delete(ref) }
         row.onEdit = { [weak self] in self?.startEditing(ref) }
         row.onDeadline = { [weak self, weak row] in
@@ -578,6 +600,38 @@ final class PanelController: NSObject, NSTextFieldDelegate, NSPopoverDelegate {
 
     func syncHover() {
         for row in rowViews { row.syncHoverWithPointer() }
+    }
+
+    private func rowClicked(_ ref: TaskRef) {
+        if editingRow() != nil {
+            endInlineEditing()
+            return
+        }
+        if settlePendingToggle(for: ref) { return }
+        let timer = Timer(timeInterval: TodoLayout.doubleClickWindow, repeats: false) { [weak self] _ in self?.flushPendingToggle() }
+        RunLoop.main.add(timer, forMode: .common)
+        pendingToggle = (ref, timer)
+        rowView(of: ref)?.pendingToggle = true
+    }
+
+    @discardableResult
+    private func settlePendingToggle(for ref: TaskRef) -> Bool {
+        guard let pending = pendingToggle else { return false }
+        guard pending.ref.section == ref.section, pending.ref.item == ref.item, pending.ref.occurrence == ref.occurrence else {
+            flushPendingToggle()
+            return false
+        }
+        pending.timer.invalidate()
+        pendingToggle = nil
+        rowView(of: ref)?.pendingToggle = false
+        return true
+    }
+
+    func flushPendingToggle() {
+        guard let pending = pendingToggle else { return }
+        pending.timer.invalidate()
+        pendingToggle = nil
+        toggle(pending.ref)
     }
 
     @objc private func pointerContextChanged() {
@@ -711,6 +765,7 @@ final class PanelController: NSObject, NSTextFieldDelegate, NSPopoverDelegate {
     }
 
     private func apply(_ change: (inout Document) -> Bool) {
+        flushPendingToggle()
         endInlineEditing()
         var found = true
         let threshold = hideDoneMode.threshold
@@ -795,6 +850,7 @@ final class PanelController: NSObject, NSTextFieldDelegate, NSPopoverDelegate {
     }
 
     private func startEditing(_ ref: TaskRef) {
+        settlePendingToggle(for: ref)
         endInlineEditing()
         rowView(of: ref)?.beginEditing()
     }
@@ -820,6 +876,7 @@ final class PanelController: NSObject, NSTextFieldDelegate, NSPopoverDelegate {
     }
 
     private func delete(_ ref: TaskRef) {
+        settlePendingToggle(for: ref)
         let locate = locator(for: ref)
         apply { document in
             guard let index = locate(document) else { return false }
@@ -848,6 +905,7 @@ final class PanelController: NSObject, NSTextFieldDelegate, NSPopoverDelegate {
     }
 
     private func editDeadline(_ ref: TaskRef, anchor: NSView) {
+        settlePendingToggle(for: ref)
         endInlineEditing()
         let target: NSView = anchor.window != nil ? anchor : (rowView(of: ref) ?? scrollView)
         showDatePicker(relativeTo: target, current: ref.item.due) { [weak self] day in self?.setDue(ref, day) }
