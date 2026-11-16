@@ -286,8 +286,13 @@ final class FileRowView: FlippedView {
                 result.text = "Failed"
                 result.color = DS.red
                 toolTip = error
+            } else if report.noGain {
+                details.text = prefix + Format.bytes(report.originalBytes)
+                result.text = "No gain"
+                result.color = DS.muted
+                toolTip = "Original kept, the compressed PDF would not be smaller"
             } else {
-                details.text = prefix + "\(Format.bytes(report.originalBytes)) \u{2192} \(Format.bytes(report.newBytes))" + (report.noGain ? " (no gain)" : "")
+                details.text = prefix + "\(Format.bytes(report.originalBytes)) \u{2192} \(Format.bytes(report.newBytes))"
                 result.text = Format.change(from: report.originalBytes, to: report.newBytes)
                 toolTip = report.output?.path ?? "Original kept"
             }

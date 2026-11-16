@@ -86,9 +86,8 @@ struct FileReport {
     var isPDF: Bool { ImageCollector.isPDF(source) }
 
     var detail: String {
-        var text = "\(Format.bytes(originalBytes)) → \(Format.bytes(newBytes)) (\(Format.change(from: originalBytes, to: newBytes)))"
+        var text = noGain ? "\(Format.bytes(originalBytes)), no gain" : "\(Format.bytes(originalBytes)) → \(Format.bytes(newBytes)) (\(Format.change(from: originalBytes, to: newBytes)))"
         if let pageCount { text = "\(pageCount) \(pageCount == 1 ? "page" : "pages"), " + text }
-        if noGain { text += " (no gain)" }
         return text
     }
 }
@@ -107,7 +106,9 @@ struct BatchReport {
     var summary: String {
         let done = succeeded
         var text = Format.count(done.count, images: !files.contains { $0.isPDF })
-        if !done.isEmpty {
+        if !done.isEmpty, done.allSatisfy(\.noGain) {
+            text += ", \(Format.bytes(originalBytes)), no gain"
+        } else if !done.isEmpty {
             text += ", \(Format.bytes(originalBytes)) → \(Format.bytes(newBytes)) (\(Format.change(from: originalBytes, to: newBytes)))"
         }
         if !failed.isEmpty { text += ", \(failed.count) failed" }
@@ -667,10 +668,10 @@ final class Optimizer {
             report.pageCount = try PDFCompressor.compress(document, to: temporary, resolution: options.pdfDpi, quality: options.quality)
             let newBytes = fileSize(temporary)
             report.noGain = newBytes >= report.originalBytes
-            if report.noGain && options.destination == .replace {
+            if report.noGain {
                 try? manager.removeItem(at: temporary)
                 report.newBytes = report.originalBytes
-                log("\(job.source.lastPathComponent): no gain, original kept")
+                log("\(job.source.lastPathComponent): no gain (\(Format.bytes(newBytes)) from \(Format.bytes(report.originalBytes))), original kept")
                 return report
             }
             try move(temporary, job: job, options: options)
@@ -723,6 +724,7 @@ final class Optimizer {
         isRunning = true
         let started = Date()
         let jobs = Self.plan(files: files, options: options)
+        let newDirectories = Set(jobs.map { $0.output.deletingLastPathComponent() }).filter { !FileManager.default.fileExists(atPath: $0.path) }
         let total = jobs.count
         var results = [FileReport?](repeating: nil, count: total)
         var completed = 0
@@ -749,6 +751,9 @@ final class Optimizer {
             let files = results.compactMap { $0 }
             let cancelled = files.count < total
             self.lock.unlock()
+            for directory in newDirectories where (try? FileManager.default.contentsOfDirectory(atPath: directory.path))?.isEmpty == true {
+                try? FileManager.default.removeItem(at: directory)
+            }
             self.isRunning = false
             let report = BatchReport(files: files, cancelled: cancelled, duration: Date().timeIntervalSince(started))
             log("batch finished: \(report.summary) in \(Format.seconds(report.duration))")
